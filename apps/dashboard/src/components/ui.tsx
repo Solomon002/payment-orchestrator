@@ -26,9 +26,9 @@ export function Stat({ label, value, hint, tone = 'default' }: { label: string; 
     bad: 'text-rose-600 dark:text-rose-400',
   }[tone];
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4 dark:border-slate-800 dark:bg-slate-900">
       <div className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</div>
-      <div className={cx('tabular mt-1 text-2xl font-semibold', toneClass)}>{value}</div>
+      <div className={cx('tabular mt-1 break-words text-lg font-semibold sm:text-2xl', toneClass)}>{value}</div>
       {hint && <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{hint}</div>}
     </div>
   );
@@ -78,28 +78,6 @@ export function Button({ variant = 'primary', className, ...props }: ButtonHTMLA
 
 export const inputClass =
   'w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-900';
-
-export function Table({ head, children, empty }: { head: ReactNode[]; children: ReactNode; empty?: boolean }) {
-  return (
-    <div className="-mx-4 overflow-x-auto">
-      <table className="min-w-full text-left text-sm">
-        <thead>
-          <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400">
-            {head.map((h, i) => (
-              <th key={i} className="whitespace-nowrap px-4 py-2 font-medium">
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">{children}</tbody>
-      </table>
-      {empty && <div className="px-4 py-8 text-center text-sm text-slate-500">Nothing here yet.</div>}
-    </div>
-  );
-}
-
-export const td = 'whitespace-nowrap px-4 py-2';
 
 export function ErrorNote({ error }: { error: unknown }) {
   if (!error) return null;

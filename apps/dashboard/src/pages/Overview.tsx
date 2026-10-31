@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { Badge, Card, ErrorNote, Stat, Table, td } from '../components/ui';
+import { DataList } from '../components/DataList';
+import { Badge, Card, ErrorNote, Stat } from '../components/ui';
 import { api, type Overview } from '../lib/api';
 import { ago, naira, percent } from '../lib/format';
 
@@ -23,7 +24,7 @@ export function OverviewPage() {
       <ErrorNote error={error} />
       {data && (
         <>
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
             <Stat label="Payments" value={data.payments.total} hint={`${data.payments.counts.pending ?? 0} pending`} />
             <Stat label="Success rate" value={percent(data.payments.successRate, 1)} tone={successTone} hint="succeeded / finished" />
             <Stat label="Succeeded volume" value={naira(data.payments.succeededVolumeKobo)} />
@@ -45,17 +46,18 @@ export function OverviewPage() {
           </div>
 
           <Card title="Payments by gateway" actions={<Link to="/payments" className="text-sm text-indigo-600 hover:underline dark:text-indigo-400">All payments →</Link>}>
-            <Table head={['Gateway', 'Succeeded', 'Pending', 'Failed', 'Expired']} empty={gateways.size === 0}>
-              {[...gateways.entries()].map(([name, counts]) => (
-                <tr key={name}>
-                  <td className={td}>{name}</td>
-                  <td className={td}><Badge value="succeeded">{counts.succeeded ?? 0}</Badge></td>
-                  <td className={td}><Badge value="pending">{counts.pending ?? 0}</Badge></td>
-                  <td className={td}><Badge value="failed">{counts.failed ?? 0}</Badge></td>
-                  <td className={td}><Badge value="expired">{counts.expired ?? 0}</Badge></td>
-                </tr>
-              ))}
-            </Table>
+            <DataList
+              rows={[...gateways.entries()]}
+              rowKey={([name]) => name}
+              empty={gateways.size === 0}
+              columns={[
+                { header: 'Gateway', cell: ([name]) => name, mobile: 'title' },
+                { header: 'Succeeded', cell: ([, c]) => <Badge value="succeeded">{c.succeeded ?? 0}</Badge> },
+                { header: 'Pending', cell: ([, c]) => <Badge value="pending">{c.pending ?? 0}</Badge> },
+                { header: 'Failed', cell: ([, c]) => <Badge value="failed">{c.failed ?? 0}</Badge> },
+                { header: 'Expired', cell: ([, c]) => <Badge value="expired">{c.expired ?? 0}</Badge> },
+              ]}
+            />
           </Card>
         </>
       )}

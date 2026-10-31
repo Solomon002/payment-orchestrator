@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
-import { Badge, Card, ErrorNote, Mono, Table, td } from '../components/ui';
+import { DataList } from '../components/DataList';
+import { Badge, Card, ErrorNote, Mono } from '../components/ui';
 import { api, type Payment, type WebhookEvent } from '../lib/api';
 import { dateTime, naira } from '../lib/format';
 
@@ -22,10 +23,10 @@ export function PaymentDetailPage() {
       <ErrorNote error={error} />
       {data && (
         <>
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <h1 className="text-xl font-semibold tabular">{naira(data.payment.amountKobo)}</h1>
             <Badge value={data.payment.status} />
-            <span className="text-sm text-slate-500">{data.payment.method.replace('_', ' ')} via {data.payment.gateway ?? 'no gateway'}</span>
+            <span className="w-full text-sm text-slate-500 sm:w-auto">{data.payment.method.replace('_', ' ')} via {data.payment.gateway ?? 'no gateway'}</span>
           </div>
 
           <Card title="Details">
@@ -40,51 +41,65 @@ export function PaymentDetailPage() {
                 ['Created', dateTime(data.payment.createdAt)],
                 ['Succeeded', dateTime(data.payment.succeededAt)],
               ].map(([k, v], i) => (
-                <div key={i} className="flex justify-between gap-4 border-b border-slate-100 py-1 dark:border-slate-800">
-                  <dt className="text-slate-500">{k}</dt>
-                  <dd className="text-right">{v}</dd>
+                // Phones: label above value, so long references wrap instead of overflowing.
+                <div key={i} className="flex flex-col gap-0.5 border-b border-slate-100 py-1 sm:flex-row sm:justify-between sm:gap-4 dark:border-slate-800">
+                  <dt className="shrink-0 text-slate-500">{k}</dt>
+                  <dd className="min-w-0 break-all sm:text-right">{v}</dd>
                 </div>
               ))}
             </dl>
           </Card>
 
           <Card title="Gateway attempts (failover history)">
-            <Table head={['#', 'Gateway', 'Result', 'Latency', 'Error']} empty={data.attempts.length === 0}>
-              {data.attempts.map((a, i) => (
-                <tr key={a.id}>
-                  <td className={td}>{i + 1}</td>
-                  <td className={td}>{a.gateway}</td>
-                  <td className={td}><Badge value={a.status} /></td>
-                  <td className={`${td} tabular`}>{a.latencyMs ?? '-'} ms</td>
-                  <td className="px-4 py-2 text-xs text-rose-600">{a.error ?? ''}</td>
-                </tr>
-              ))}
-            </Table>
+            <DataList
+              rows={data.attempts.map((a, i) => ({ ...a, n: i + 1 }))}
+              rowKey={(a) => a.id}
+              empty={data.attempts.length === 0}
+              columns={[
+                { header: '#', cell: (a) => a.n, mobile: 'hide' },
+                { header: 'Gateway', cell: (a) => `${a.n}. ${a.gateway}`, mobile: 'title' },
+                { header: 'Result', cell: (a) => <Badge value={a.status} />, mobile: 'badge' },
+                { header: 'Latency', cell: (a) => <span className="tabular">{a.latencyMs ?? '-'} ms</span> },
+                { header: 'Error', cell: (a) => <span className="whitespace-normal text-xs text-rose-600">{a.error ?? ''}</span> },
+              ]}
+            />
           </Card>
 
           <Card title="Ledger entries (each sums to zero)">
-            <div className="space-y-4">
+            <div className="space-y-5">
               {data.journalEntries.map((je) => {
                 const sum = je.postings.reduce((s, p) => s + p.amountKobo, 0);
                 return (
                   <div key={je.id}>
-                    <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
-                      <div className="text-sm font-medium">{je.description}</div>
-                      <Mono>{je.reference}</Mono>
+                    <div className="mb-1 flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-2">
+                      <div className="break-words text-sm font-medium">{je.description}</div>
+                      <span className="break-all"><Mono>{je.reference}</Mono></span>
                     </div>
-                    <Table head={['Account', 'Debit', 'Credit']}>
-                      {je.postings.map((p, i) => (
-                        <tr key={i}>
-                          <td className={td}><Mono>{p.account}</Mono></td>
-                          <td className={`${td} tabular text-right`}>{p.amountKobo > 0 ? naira(p.amountKobo) : ''}</td>
-                          <td className={`${td} tabular text-right`}>{p.amountKobo < 0 ? naira(-p.amountKobo) : ''}</td>
-                        </tr>
-                      ))}
-                      <tr className="font-medium">
-                        <td className={td}>Total</td>
-                        <td colSpan={2} className={`${td} text-right ${sum === 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{sum === 0 ? 'balanced (0)' : `UNBALANCED ${sum}`}</td>
-                      </tr>
-                    </Table>
+                    <DataList
+                      rows={je.postings.map((p, i) => ({ ...p, i }))}
+                      rowKey={(p) => String(p.i)}
+                      columns={[
+                        { header: 'Account', cell: (p) => <span className="break-all"><Mono>{p.account}</Mono></span>, mobile: 'title' },
+                        { header: 'Debit', cell: (p) => (p.amountKobo > 0 ? naira(p.amountKobo) : ''), align: 'right', mobile: 'hide' },
+                        { header: 'Credit', cell: (p) => (p.amountKobo < 0 ? naira(-p.amountKobo) : ''), align: 'right', mobile: 'hide' },
+                        {
+                          header: 'Dr/Cr',
+                          cell: (p) => (
+                            <span className="tabular text-sm">
+                              {p.amountKobo > 0 ? 'Dr' : 'Cr'} {naira(Math.abs(p.amountKobo))}
+                            </span>
+                          ),
+                          mobile: 'badge',
+                          desktopHide: true, // desktop shows separate Debit / Credit columns instead
+                        },
+                      ]}
+                      footer={
+                        <div className={`flex justify-between text-sm font-medium ${sum === 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                          <span>Total</span>
+                          <span>{sum === 0 ? 'balanced (0)' : `UNBALANCED ${sum}`}</span>
+                        </div>
+                      }
+                    />
                   </div>
                 );
               })}
@@ -92,18 +107,19 @@ export function PaymentDetailPage() {
           </Card>
 
           <Card title="Webhooks for this payment">
-            <Table head={['Received', 'Gateway', 'Event', 'Status', 'Duplicates ignored', 'Attempts']} empty={data.webhooks.length === 0}>
-              {data.webhooks.map((w) => (
-                <tr key={w.id}>
-                  <td className={td}>{dateTime(w.receivedAt)}</td>
-                  <td className={td}>{w.gateway}</td>
-                  <td className={td}>{w.eventType}</td>
-                  <td className={td}><Badge value={w.status} /></td>
-                  <td className={`${td} tabular`}>{w.duplicateCount}</td>
-                  <td className={`${td} tabular`}>{w.attempts}</td>
-                </tr>
-              ))}
-            </Table>
+            <DataList
+              rows={data.webhooks}
+              rowKey={(w) => w.id}
+              empty={data.webhooks.length === 0}
+              columns={[
+                { header: 'Received', cell: (w) => dateTime(w.receivedAt) },
+                { header: 'Gateway', cell: (w) => w.gateway },
+                { header: 'Event', cell: (w) => w.eventType, mobile: 'title' },
+                { header: 'Status', cell: (w) => <Badge value={w.status} />, mobile: 'badge' },
+                { header: 'Duplicates ignored', cell: (w) => <span className="tabular">{w.duplicateCount}</span> },
+                { header: 'Attempts', cell: (w) => <span className="tabular">{w.attempts}</span> },
+              ]}
+            />
           </Card>
         </>
       )}

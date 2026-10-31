@@ -2,7 +2,8 @@ import { PAYMENT_METHODS, PAYMENT_STATUSES } from '@po/shared';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
-import { Badge, Button, Card, ErrorNote, inputClass, Mono, Table, td } from '../components/ui';
+import { DataList } from '../components/DataList';
+import { Badge, Button, Card, ErrorNote, inputClass, Mono } from '../components/ui';
 import { api, type Payment } from '../lib/api';
 import { dateTime, naira, shortRef } from '../lib/format';
 
@@ -29,7 +30,7 @@ export function PaymentsPage() {
     <div className="space-y-4">
       <h1 className="text-xl font-semibold">Payments</h1>
       <Card>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4">
           <select className={inputClass} value={filters.status} onChange={set('status')} aria-label="Status">
             <option value="">All statuses</option>
             {PAYMENT_STATUSES.map((s) => <option key={s}>{s}</option>)}
@@ -49,19 +50,21 @@ export function PaymentsPage() {
       </Card>
       <ErrorNote error={query.error} />
       <Card>
-        <Table head={['Created', 'Reference', 'Merchant ref', 'Amount', 'Method', 'Gateway', 'Status']} empty={!query.isLoading && rows.length === 0}>
-          {rows.map((p) => (
-            <tr key={p.id} onClick={() => navigate(`/payments/${p.id}`)} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50">
-              <td className={td}>{dateTime(p.createdAt)}</td>
-              <td className={td}><Mono>{shortRef(p.reference, 16)}</Mono></td>
-              <td className={td}><Mono>{shortRef(p.merchantReference, 18)}</Mono></td>
-              <td className={`${td} tabular text-right`}>{naira(p.amountKobo)}</td>
-              <td className={td}>{p.method.replace('_', ' ')}</td>
-              <td className={td}>{p.gateway ?? '-'}</td>
-              <td className={td}><Badge value={p.status} /></td>
-            </tr>
-          ))}
-        </Table>
+        <DataList
+          rows={rows}
+          rowKey={(p) => p.id}
+          onRowClick={(p) => navigate(`/payments/${p.id}`)}
+          empty={!query.isLoading && rows.length === 0}
+          columns={[
+            { header: 'Created', cell: (p) => dateTime(p.createdAt) },
+            { header: 'Reference', cell: (p) => <Mono>{shortRef(p.reference, 16)}</Mono> },
+            { header: 'Merchant ref', cell: (p) => <Mono>{shortRef(p.merchantReference, 18)}</Mono>, mobile: 'hide' },
+            { header: 'Amount', cell: (p) => <span className="tabular">{naira(p.amountKobo)}</span>, align: 'right', mobile: 'title' },
+            { header: 'Method', cell: (p) => p.method.replace('_', ' ') },
+            { header: 'Gateway', cell: (p) => p.gateway ?? '-' },
+            { header: 'Status', cell: (p) => <Badge value={p.status} />, mobile: 'badge' },
+          ]}
+        />
         {query.hasNextPage && (
           <div className="mt-4 text-center">
             <Button variant="secondary" onClick={() => query.fetchNextPage()} disabled={query.isFetchingNextPage}>

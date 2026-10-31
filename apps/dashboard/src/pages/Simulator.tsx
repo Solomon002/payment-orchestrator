@@ -64,7 +64,7 @@ function GatewayControls({ gw, onPatch }: { gw: MockGatewayState; onPatch: (patc
 
         <div>
           <div className="mb-1 text-sm">Method outages</div>
-          <div className="flex gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row">
             {(['card', 'bank_transfer'] as PaymentMethod[]).map((m) => {
               const down = c.methodOutages[m];
               return (
@@ -83,7 +83,7 @@ function GatewayControls({ gw, onPatch }: { gw: MockGatewayState; onPatch: (patc
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="text-sm">
             Webhook behaviour
             <select className={`${inputClass} mt-1`} value={c.webhookMode} onChange={(e) => onPatch({ webhookMode: e.target.value as MockControlPatch['webhookMode'] })}>
@@ -109,7 +109,7 @@ function GatewayControls({ gw, onPatch }: { gw: MockGatewayState; onPatch: (patc
             <div className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-500">Recent webhook deliveries</div>
             <ul className="max-h-36 space-y-1 overflow-auto text-xs">
               {gw.recentDeliveries.slice(0, 8).map((d) => (
-                <li key={d.eventId + d.at} className="flex justify-between gap-2">
+                <li key={d.eventId + d.at} className="flex flex-wrap justify-between gap-x-2 gap-y-0.5">
                   <span>{time(d.at)} <Mono>{shortRef(d.reference, 12)}</Mono></span>
                   <span>
                     <Badge value={d.mode === 'normal' ? 'processed' : d.mode === 'drop' ? 'expired' : 'pending'}>{d.mode}</Badge>{' '}
@@ -194,9 +194,9 @@ export function SimulatorPage() {
         </div>
       </Card>
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
+      <div className="grid gap-4 lg:grid-cols-2">
         <Card title="Fire test payments (demo merchant)">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <label className="text-sm">
               Method
               <select className={`${inputClass} mt-1`} value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}>

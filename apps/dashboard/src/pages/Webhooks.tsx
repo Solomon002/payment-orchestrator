@@ -1,7 +1,8 @@
 import { WEBHOOK_STATUSES } from '@po/shared';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Badge, Card, ErrorNote, inputClass, Mono, Table, td } from '../components/ui';
+import { DataList } from '../components/DataList';
+import { Badge, Card, ErrorNote, inputClass, Mono } from '../components/ui';
 import { api, type WebhookEvent } from '../lib/api';
 import { dateTime, shortRef } from '../lib/format';
 
@@ -26,32 +27,34 @@ export function WebhooksPage() {
           <h1 className="text-xl font-semibold">Webhook Events</h1>
           <p className="text-sm text-slate-500">Every webhook is stored raw, deduplicated by event id, and processed by the worker.</p>
         </div>
-        <select className={`${inputClass} w-48`} value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Status">
+        <select className={`${inputClass} sm:w-48`} value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Status">
           <option value="">All statuses</option>
           {WEBHOOK_STATUSES.map((s) => <option key={s}>{s}</option>)}
         </select>
       </div>
       <ErrorNote error={list.error} />
       <Card>
-        <Table head={['Received', 'Gateway', 'Event', 'Payment ref', 'Signature', 'Status', 'Attempts', 'Duplicates', 'Last error']} empty={list.data?.events.length === 0}>
-          {list.data?.events.map((e) => (
-            <tr key={e.id} onClick={() => setOpenId(openId === e.id ? null : e.id)} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50">
-              <td className={td}>{dateTime(e.receivedAt)}</td>
-              <td className={td}>{e.gateway}</td>
-              <td className={td}>{e.eventType ?? '-'}</td>
-              <td className={td}><Mono>{shortRef(e.reference, 16)}</Mono></td>
-              <td className={td}>{e.signatureValid ? <Badge value="succeeded">valid</Badge> : <Badge value="rejected">invalid</Badge>}</td>
-              <td className={td}><Badge value={e.status} /></td>
-              <td className={`${td} tabular`}>{e.attempts}</td>
-              <td className={`${td} tabular`}>{e.duplicateCount > 0 ? <Badge value="pending">{e.duplicateCount} ignored</Badge> : 0}</td>
-              <td className="max-w-xs truncate px-4 py-2 text-xs text-rose-600">{e.lastError ?? ''}</td>
-            </tr>
-          ))}
-        </Table>
+        <DataList
+          rows={list.data?.events ?? []}
+          rowKey={(e) => e.id}
+          onRowClick={(e) => setOpenId(openId === e.id ? null : e.id)}
+          empty={list.data?.events.length === 0}
+          columns={[
+            { header: 'Received', cell: (e) => dateTime(e.receivedAt) },
+            { header: 'Gateway', cell: (e) => e.gateway },
+            { header: 'Event', cell: (e) => e.eventType ?? '-', mobile: 'title' },
+            { header: 'Payment ref', cell: (e) => <Mono>{shortRef(e.reference, 16)}</Mono> },
+            { header: 'Signature', cell: (e) => (e.signatureValid ? <Badge value="succeeded">valid</Badge> : <Badge value="rejected">invalid</Badge>) },
+            { header: 'Status', cell: (e) => <Badge value={e.status} />, mobile: 'badge' },
+            { header: 'Attempts', cell: (e) => <span className="tabular">{e.attempts}</span> },
+            { header: 'Duplicates', cell: (e) => (e.duplicateCount > 0 ? <Badge value="pending">{e.duplicateCount} ignored</Badge> : 0) },
+            { header: 'Last error', cell: (e) => <span className="block max-w-xs truncate text-xs text-rose-600">{e.lastError ?? ''}</span>, mobile: 'hide' },
+          ]}
+        />
       </Card>
       {openId && detail.data && (
         <Card title={`Raw body · ${detail.data.event.eventId}`}>
-          <pre className="max-h-80 overflow-auto rounded-lg bg-slate-100 p-3 font-mono text-xs dark:bg-slate-950">
+          <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-slate-100 p-3 font-mono text-xs dark:bg-slate-950">
             {(() => {
               try {
                 return JSON.stringify(JSON.parse(detail.data.event.rawBody ?? ''), null, 2);

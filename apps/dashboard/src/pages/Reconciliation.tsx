@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Badge, Button, Card, ErrorNote, inputClass, Mono, Table, td } from '../components/ui';
+import { DataList } from '../components/DataList';
+import { Badge, Button, Card, ErrorNote, inputClass, Mono } from '../components/ui';
 import { api, getAdminKey, post, type Discrepancy, type ReconRun } from '../lib/api';
 import { dateTime, naira, shortRef } from '../lib/format';
 
@@ -67,16 +68,21 @@ export function ReconciliationPage() {
       <ErrorNote error={runNow.error ?? runs.error} />
 
       <Card title={`Open discrepancies (${open.data?.discrepancies.length ?? 0})`}>
-        <Table head={['Type', 'Gateway', 'Reference', 'Ledger', 'Gateway', 'Note', '']} empty={open.data?.discrepancies.length === 0}>
-          {open.data?.discrepancies.map((d) => (
-            <tr key={d.id}>
-              <td className={td} title={TYPE_HELP[d.type]}><Badge value="failed">{d.type.replaceAll('_', ' ')}</Badge></td>
-              <td className={td}>{d.gateway}</td>
-              <td className={td}><Mono>{shortRef(d.gatewayReference, 18)}</Mono></td>
-              <td className={`${td} tabular text-right`}>{naira(d.ledgerAmount)}</td>
-              <td className={`${td} tabular text-right`}>{naira(d.gatewayAmount)}</td>
-              <td className="px-4 py-2 text-xs text-slate-500">{d.note}</td>
-              <td className={td}>
+        <DataList
+          rows={open.data?.discrepancies ?? []}
+          rowKey={(d) => d.id}
+          empty={open.data?.discrepancies.length === 0}
+          columns={[
+            { header: 'Type', cell: (d) => <span title={TYPE_HELP[d.type]}><Badge value="failed">{d.type.replaceAll('_', ' ')}</Badge></span>, mobile: 'title' },
+            { header: 'Gateway', cell: (d) => d.gateway },
+            { header: 'Reference', cell: (d) => <Mono>{shortRef(d.gatewayReference, 18)}</Mono> },
+            { header: 'Ledger', cell: (d) => naira(d.ledgerAmount), align: 'right' },
+            { header: 'Gateway amount', cell: (d) => naira(d.gatewayAmount), align: 'right' },
+            { header: 'Note', cell: (d) => <span className="whitespace-normal text-xs text-slate-500">{d.note}</span> },
+            {
+              header: 'Action',
+              mobile: 'badge',
+              cell: (d) => (
                 <Button
                   variant="secondary"
                   onClick={() => {
@@ -86,25 +92,30 @@ export function ReconciliationPage() {
                 >
                   Resolve
                 </Button>
-              </td>
-            </tr>
-          ))}
-        </Table>
+              ),
+            },
+          ]}
+        />
       </Card>
 
       <Card title="Runs">
-        <Table head={['Started', 'Status', 'Settlements', 'Payments', 'Matched', 'Discrepancies']} empty={runs.data?.runs.length === 0}>
-          {runs.data?.runs.map((r) => (
-            <tr key={r.id} onClick={() => setSelectedRun(r.id)} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50">
-              <td className={td}>{dateTime(r.startedAt)}</td>
-              <td className={td}><Badge value={r.status} /></td>
-              <td className={`${td} tabular`}>{r.totals?.settlementsChecked ?? '-'}</td>
-              <td className={`${td} tabular`}>{r.totals?.paymentsChecked ?? '-'}</td>
-              <td className={`${td} tabular`}>{r.totals?.matched ?? '-'}</td>
-              <td className={`${td} tabular`}>{r.totals ? (r.totals.discrepancies > 0 ? <Badge value="failed">{r.totals.discrepancies}</Badge> : <Badge value="succeeded">0</Badge>) : '-'}</td>
-            </tr>
-          ))}
-        </Table>
+        <DataList
+          rows={runs.data?.runs ?? []}
+          rowKey={(r) => r.id}
+          onRowClick={(r) => setSelectedRun(r.id)}
+          empty={runs.data?.runs.length === 0}
+          columns={[
+            { header: 'Started', cell: (r) => dateTime(r.startedAt), mobile: 'title' },
+            { header: 'Status', cell: (r) => <Badge value={r.status} />, mobile: 'badge' },
+            { header: 'Settlements', cell: (r) => <span className="tabular">{r.totals?.settlementsChecked ?? '-'}</span> },
+            { header: 'Payments', cell: (r) => <span className="tabular">{r.totals?.paymentsChecked ?? '-'}</span> },
+            { header: 'Matched', cell: (r) => <span className="tabular">{r.totals?.matched ?? '-'}</span> },
+            {
+              header: 'Discrepancies',
+              cell: (r) => (r.totals ? (r.totals.discrepancies > 0 ? <Badge value="failed">{r.totals.discrepancies}</Badge> : <Badge value="succeeded">0</Badge>) : '-'),
+            },
+          ]}
+        />
       </Card>
 
       {run.data && (
@@ -116,23 +127,24 @@ export function ReconciliationPage() {
               ))}
             </div>
           )}
-          <Table head={['Type', 'Gateway', 'Reference', 'Ledger', 'Gateway', 'Resolved']} empty={run.data.run.discrepancies?.length === 0}>
-            {run.data.run.discrepancies?.map((d) => (
-              <tr key={d.id}>
-                <td className={td}>{d.type.replaceAll('_', ' ')}</td>
-                <td className={td}>{d.gateway}</td>
-                <td className={td}><Mono>{shortRef(d.gatewayReference, 18)}</Mono></td>
-                <td className={`${td} tabular text-right`}>{naira(d.ledgerAmount)}</td>
-                <td className={`${td} tabular text-right`}>{naira(d.gatewayAmount)}</td>
-                <td className={td}>{d.resolved ? 'yes' : 'no'}</td>
-              </tr>
-            ))}
-          </Table>
+          <DataList
+            rows={run.data.run.discrepancies ?? []}
+            rowKey={(d) => d.id}
+            empty={run.data.run.discrepancies?.length === 0}
+            columns={[
+              { header: 'Type', cell: (d) => d.type.replaceAll('_', ' '), mobile: 'title' },
+              { header: 'Gateway', cell: (d) => d.gateway },
+              { header: 'Reference', cell: (d) => <Mono>{shortRef(d.gatewayReference, 18)}</Mono> },
+              { header: 'Ledger', cell: (d) => naira(d.ledgerAmount), align: 'right' },
+              { header: 'Gateway amount', cell: (d) => naira(d.gatewayAmount), align: 'right' },
+              { header: 'Resolved', cell: (d) => (d.resolved ? 'yes' : 'no'), mobile: 'badge' },
+            ]}
+          />
         </Card>
       )}
 
       <Card title="Upload a settlement CSV (for gateways without a settlement API)">
-        <p className="mb-2 text-xs text-slate-500">
+        <p className="mb-2 break-all text-xs text-slate-500">
           Header: <Mono>gateway,reference,amount_kobo,fee_kobo,settled_at,batch_id</Mono>
         </p>
         <textarea className={`${inputClass} h-28 font-mono text-xs`} value={csv} onChange={(e) => setCsv(e.target.value)} placeholder="gateway,reference,amount_kobo,fee_kobo,settled_at,batch_id" />
