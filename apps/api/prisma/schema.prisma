@@ -1,0 +1,297 @@
+// Prisma schema. Money columns are BigInt holding integer kobo.
+// Ledger-critical rules (zero-sum entries, append-only postings) are ALSO enforced
+// inside Postgres by triggers in the migration SQL, so a bug in application code
+// cannot corrupt the books.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AccountType {
+  merchant_balance // what we owe a merchant (liability)
+  merchant_pending // payments started but not yet confirmed (liability)
+  payments_pending // money we expect from customers (asset)
+  gateway_clearing // money a gateway holds for us until settlement (asset)
+  gateway_fees // fees gateways charge us (expense)
+  platform_revenue // our fee income (revenue)
+  payouts_clearing // money on its way out to merchants' banks (asset)
+  opening_balance // seed/top-up source used only for demos (equity)
+}
+
+enum NormalSide {
+  debit
+  credit
+}
+
+enum PaymentMethod {
+  card
+  bank_transfer
+}
+
+enum PaymentStatus {
+  created
+  pending
+  succeeded
+  failed
+  expired
+}
+
+enum AttemptStatus {
+  initiated
+  error
+  succeeded
+  failed
+}
+
+enum WithdrawalStatus {
+  completed
+  rejected
+}
+
+enum WebhookStatus {
+  received
+  queued
+  processed
+  failed
+  rejected
+}
+
+enum IdempotencyStatus {
+  in_progress
+  completed
+}
+
+enum ReconciliationStatus {
+  running
+  completed
+  failed
+}
+
+enum DiscrepancyType {
+  missing_in_ledger
+  missing_in_gateway
+  amount_mismatch
+  status_mismatch
+}
+
+model Merchant {
+  id           String   @id @default(uuid()) @db.Uuid
+  name         String
+  apiKeyHash   String   @unique @map("api_key_hash")
+  apiKeyPrefix String   @map("api_key_prefix")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  accounts    Account[]
+  payments    Payment[]
+  withdrawals Withdrawal[]
+
+  @@map("merchants")
+}
+
+model Account {
+  id         String      @id @default(uuid()) @db.Uuid
+  // Human-readable unique code, e.g. "merchant_balance:<merchantId>" or "gateway_clearing:mockpay-a".
+  code       String      @unique
+  type       AccountType
+  normalSide NormalSide  @map("normal_side")
+  merchantId String?     @map("merchant_id") @db.Uuid
+  gateway    String?
+  currency   String      @default("NGN")
+  createdAt  DateTime    @default(now()) @map("created_at")
+
+  merchant Merchant? @relation(fields: [merchantId], references: [id])
+  postings Posting[]
+
+  @@map("accounts")
+}
+
+model JournalEntry {
+  id          String   @id @default(uuid()) @db.Uuid
+  // Unique business reference: the same economic event can never be posted twice.
+  reference   String   @unique
+  description String
+  paymentId   String?  @map("payment_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  payment  Payment?  @relation(fields: [paymentId], references: [id])
+  postings Posting[]
+
+  @@index([paymentId])
+  @@map("journal_entries")
+}
+
+model Posting {
+  id             String   @id @default(uuid()) @db.Uuid
+  journalEntryId String   @map("journal_entry_id") @db.Uuid
+  accountId      String   @map("account_id") @db.Uuid
+  // Signed kobo: positive = debit, negative = credit. Postings of one entry sum to zero.
+  amountKobo     BigInt   @map("amount_kobo")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  journalEntry JournalEntry @relation(fields: [journalEntryId], references: [id])
+  account      Account      @relation(fields: [accountId], references: [id])
+
+  @@index([accountId])
+  @@index([journalEntryId])
+  @@map("postings")
+}
+
+model Payment {
+  id                String        @id @default(uuid()) @db.Uuid
+  merchantId        String        @map("merchant_id") @db.Uuid
+  // Merchant's own order reference (unique per merchant).
+  merchantReference String        @map("merchant_reference")
+  // Our reference, sent to gateways. Globally unique.
+  reference         String        @unique
+  amountKobo        BigInt        @map("amount_kobo")
+  feeKobo           BigInt?       @map("fee_kobo")
+  currency          String        @default("NGN")
+  method            PaymentMethod
+  status            PaymentStatus @default(created)
+  customerEmail     String        @map("customer_email")
+  selectedGateway   String?       @map("selected_gateway")
+  checkoutUrl       String?       @map("checkout_url")
+  failureReason     String?       @map("failure_reason")
+  succeededAt       DateTime?     @map("succeeded_at")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+
+  merchant       Merchant         @relation(fields: [merchantId], references: [id])
+  attempts       PaymentAttempt[]
+  journalEntries JournalEntry[]
+
+  @@unique([merchantId, merchantReference])
+  @@index([status, createdAt])
+  @@map("payments")
+}
+
+model PaymentAttempt {
+  id               String        @id @default(uuid()) @db.Uuid
+  paymentId        String        @map("payment_id") @db.Uuid
+  gateway          String
+  method           PaymentMethod
+  status           AttemptStatus
+  gatewayReference String?       @map("gateway_reference")
+  error            String?
+  latencyMs        Int?          @map("latency_ms")
+  startedAt        DateTime      @default(now()) @map("started_at")
+  finishedAt       DateTime?     @map("finished_at")
+
+  payment Payment @relation(fields: [paymentId], references: [id])
+
+  @@index([paymentId])
+  @@map("payment_attempts")
+}
+
+model Withdrawal {
+  id             String           @id @default(uuid()) @db.Uuid
+  merchantId     String           @map("merchant_id") @db.Uuid
+  amountKobo     BigInt           @map("amount_kobo")
+  status         WithdrawalStatus
+  // Safe path stores the client's key; a unique index makes a duplicate withdrawal impossible
+  // even if the idempotency middleware were bypassed.
+  idempotencyKey String?          @map("idempotency_key")
+  journalEntryId String?          @map("journal_entry_id") @db.Uuid
+  mode           String // "safe" | "naive"
+  createdAt      DateTime         @default(now()) @map("created_at")
+
+  merchant Merchant @relation(fields: [merchantId], references: [id])
+
+  @@unique([merchantId, idempotencyKey])
+  @@map("withdrawals")
+}
+
+model WebhookEvent {
+  id             String        @id @default(uuid()) @db.Uuid
+  gateway        String
+  // Gateway's event identifier; (gateway, eventId) is unique so a resend is detected.
+  eventId        String        @map("event_id")
+  eventType      String?       @map("event_type")
+  reference      String?
+  rawBody        String        @map("raw_body")
+  signatureValid Boolean       @map("signature_valid")
+  status         WebhookStatus @default(received)
+  attempts       Int           @default(0)
+  duplicateCount Int           @default(0) @map("duplicate_count")
+  lastError      String?       @map("last_error")
+  receivedAt     DateTime      @default(now()) @map("received_at")
+  processedAt    DateTime?     @map("processed_at")
+
+  @@unique([gateway, eventId])
+  @@index([status, receivedAt])
+  @@index([reference])
+  @@map("webhook_events")
+}
+
+model IdempotencyKey {
+  id             String            @id @default(uuid()) @db.Uuid
+  merchantId     String            @map("merchant_id") @db.Uuid
+  key            String
+  requestHash    String            @map("request_hash")
+  status         IdempotencyStatus @default(in_progress)
+  responseStatus Int?              @map("response_status")
+  responseBody   Json?             @map("response_body")
+  lockedAt       DateTime          @default(now()) @map("locked_at")
+  createdAt      DateTime          @default(now()) @map("created_at")
+
+  @@unique([merchantId, key])
+  @@index([createdAt])
+  @@map("idempotency_keys")
+}
+
+model GatewaySettlement {
+  id         String   @id @default(uuid()) @db.Uuid
+  gateway    String
+  reference  String
+  amountKobo BigInt   @map("amount_kobo")
+  feeKobo    BigInt   @map("fee_kobo")
+  settledAt  DateTime @map("settled_at")
+  batchId    String   @map("batch_id")
+  source     String // "api_import" | "csv_upload"
+  importedAt DateTime @default(now()) @map("imported_at")
+
+  @@unique([gateway, reference])
+  @@index([settledAt])
+  @@map("gateway_settlements")
+}
+
+model ReconciliationRun {
+  id         String               @id @default(uuid()) @db.Uuid
+  status     ReconciliationStatus @default(running)
+  windowFrom DateTime             @map("window_from")
+  windowTo   DateTime             @map("window_to")
+  totals     Json?
+  error      String?
+  startedAt  DateTime             @default(now()) @map("started_at")
+  finishedAt DateTime?            @map("finished_at")
+
+  discrepancies Discrepancy[]
+
+  @@map("reconciliation_runs")
+}
+
+model Discrepancy {
+  id               String          @id @default(uuid()) @db.Uuid
+  runId            String          @map("run_id") @db.Uuid
+  type             DiscrepancyType
+  gateway          String
+  paymentId        String?         @map("payment_id") @db.Uuid
+  gatewayReference String?         @map("gateway_reference")
+  ledgerAmount     BigInt?         @map("ledger_amount")
+  gatewayAmount    BigInt?         @map("gateway_amount")
+  note             String?
+  resolved         Boolean         @default(false)
+  resolvedNote     String?         @map("resolved_note")
+  createdAt        DateTime        @default(now()) @map("created_at")
+
+  run ReconciliationRun @relation(fields: [runId], references: [id])
+
+  @@index([runId])
+  @@index([resolved])
+  @@map("discrepancies")
+}

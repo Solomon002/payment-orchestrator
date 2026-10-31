@@ -1,0 +1,53 @@
+{
+  "name": "@po/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "dev:worker": "tsx watch src/worker.ts",
+    "start": "tsx src/server.ts",
+    "start:worker": "tsx src/worker.ts",
+    "postinstall": "prisma generate",
+    "db:generate": "prisma generate",
+    "db:migrate": "dotenv -e ../../.env -- prisma migrate dev",
+    "db:deploy": "dotenv -e ../../.env -- prisma migrate deploy",
+    "db:seed": "tsx src/scripts/seed.ts",
+    "db:studio": "dotenv -e ../../.env -- prisma studio",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json",
+    "demo": "tsx src/scripts/demo.ts",
+    "demo:concurrency": "tsx src/scripts/concurrency-demo.ts"
+  },
+  "dependencies": {
+    "@po/mock-gateway": "workspace:*",
+    "@po/shared": "workspace:*",
+    "@prisma/client": "~6.19.3",
+    "bullmq": "^5.81.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0",
+    "express-rate-limit": "^7.5.1",
+    "helmet": "^8.1.0",
+    "ioredis": "^5.8.0",
+    "pino": "^9.14.0",
+    "pino-http": "^10.5.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/autocannon": "^7.12.7",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "@types/node": "^22.18.0",
+    "@types/supertest": "^6.0.3",
+    "autocannon": "^8.0.0",
+    "dotenv-cli": "^8.0.0",
+    "pino-pretty": "^13.1.0",
+    "prisma": "~6.19.3",
+    "supertest": "^7.1.4",
+    "tsx": "^4.20.0",
+    "typescript": "~5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

@@ -15,3 +15,6 @@ coverage/
 *.log
 .DS_Store
 Thumbs.db
+
+# Generated settlement uploads / local scratch
+tmp/

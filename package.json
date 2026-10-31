@@ -1,0 +1,28 @@
+{
+  "name": "payment-orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Multi-rail payment orchestrator and reconciliation engine (portfolio project)",
+  "packageManager": "pnpm@12.11.2",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "setup": "node scripts/ensure-env.mjs && pnpm install && docker compose up -d --wait && pnpm --filter @po/api db:deploy && pnpm --filter @po/api db:seed",
+    "dev": "concurrently -k -n api,worker,mock-a,mock-b,dash -c blue,magenta,yellow,cyan,green \"pnpm --filter @po/api dev\" \"pnpm --filter @po/api dev:worker\" \"pnpm --filter @po/mock-gateway dev:a\" \"pnpm --filter @po/mock-gateway dev:b\" \"pnpm --filter @po/dashboard dev\"",
+    "test": "pnpm -r --workspace-concurrency=1 test",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "eslint .",
+    "demo": "pnpm --filter @po/api demo",
+    "demo:concurrency": "pnpm --filter @po/api demo:concurrency",
+    "db:up": "docker compose up -d --wait",
+    "db:down": "docker compose down"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "concurrently": "^9.2.0",
+    "eslint": "^9.39.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.46.0"
+  }
+}

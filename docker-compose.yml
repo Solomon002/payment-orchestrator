@@ -1,0 +1,40 @@
+# Local infrastructure only. Host ports are deliberately non-default (5433, 6380)
+# so they don't clash with any Postgres/Redis already installed on the machine.
+# Images come from the AWS ECR Public mirror of the official Docker Hub images
+# (identical images; Docker Hub auth was failing on the dev machine).
+name: payment-orchestrator
+
+services:
+  postgres:
+    image: public.ecr.aws/docker/library/postgres:16-alpine
+    environment:
+      POSTGRES_USER: po
+      POSTGRES_PASSWORD: po_dev_password # local dev only, never reused anywhere real
+      POSTGRES_DB: payments
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U po -d payments"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: public.ecr.aws/docker/library/redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:6380:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pgdata:
+  redisdata:
