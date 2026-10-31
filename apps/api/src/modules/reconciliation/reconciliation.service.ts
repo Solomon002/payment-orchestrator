@@ -92,6 +92,10 @@ export async function runReconciliation(ctx: AppContext, options: RunOptions = {
       const p = paymentByRef.get(s.reference);
       if (!p) {
         add({ type: 'missing_in_ledger', gateway: s.gateway, gatewayReference: s.reference, gatewayAmount: s.amountKobo, note: 'Gateway settled a reference we have no payment for' });
+      } else if (p.gateway !== s.gateway) {
+        // Same reference settled by a gateway that did NOT complete the payment: e.g. a
+        // failover where the first gateway timed out but actually charged the customer.
+        add({ type: 'missing_in_ledger', gateway: s.gateway, paymentId: p.id, gatewayReference: s.reference, gatewayAmount: s.amountKobo, note: `Settled on ${s.gateway} but our payment completed on ${p.gateway}: possible double charge` });
       } else if (p.status !== 'succeeded') {
         add({ type: 'status_mismatch', gateway: s.gateway, paymentId: p.id, gatewayReference: s.reference, gatewayAmount: s.amountKobo, note: `Gateway settled it but our payment is "${p.status}"` });
       } else if (p.grossKobo !== s.amountKobo) {

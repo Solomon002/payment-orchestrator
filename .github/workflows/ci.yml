@@ -1,0 +1,74 @@
+# CI: the same commands that pass locally, against real Postgres and Redis.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      # Same host ports as docker-compose.yml / .env.example, so no URL overrides are needed.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: po
+          POSTGRES_PASSWORD: po_dev_password
+          POSTGRES_DB: payments
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U po -d payments"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6380:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4 # version comes from "packageManager" in package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Create .env with random CI secrets
+        run: node scripts/ensure-env.mjs
+
+      - name: Create test database
+        run: psql "postgresql://po:po_dev_password@localhost:5433/payments" -c "CREATE DATABASE payments_test"
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Migrate dev database
+        run: pnpm --filter @po/api db:deploy
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build dashboard
+        run: pnpm --filter @po/dashboard build
+
+      - name: End-to-end demo
+        run: pnpm demo
+
+      - name: Concurrency demo (naive vs safe withdrawals)
+        run: pnpm demo:concurrency

@@ -87,6 +87,17 @@ describe('reconciliation', () => {
     expect(ok.reference).toBeTruthy();
   });
 
+  it('flags the same reference settled on a second gateway (possible double charge after failover)', async () => {
+    const p = await succeededPayment();
+    const other = p.gateway === 'mockpay-a' ? 'mockpay-b' : 'mockpay-a';
+    await h.ctx.prisma.gatewaySettlement.create({
+      data: { gateway: other, reference: p.reference, amountKobo: 250_000n, feeKobo: 3_750n, settledAt: new Date(), batchId: 'x', source: 'csv_upload' },
+    });
+    const run = await runReconciliation(h.ctx);
+    expect(run.discrepancies).toHaveLength(1);
+    expect(run.discrepancies[0]).toMatchObject({ type: 'missing_in_ledger', gateway: other, gatewayReference: p.reference });
+  });
+
   it('runs on demand through the admin API and lists discrepancies', async () => {
     await succeededPayment();
     await control('mockpay-a', '/settlements/phantom', { amountKobo: 10_000 });
