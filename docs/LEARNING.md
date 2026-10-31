@@ -85,3 +85,23 @@ Note that the naive run did not break the ledger's zero-sum rule: every entry ba
 **Proved by tests:** duplicate webhook processed once; bad signature rejected (stored as `rejected`, no money moves); dropped webhook recovered by the poller; a late webhook after the poller already settled changes nothing; illegal transitions throw.
 
 **Interview question:** *"Why return 200 to a duplicate webhook instead of 409?"* Because the gateway did nothing wrong. A non-2xx tells it to retry, which creates even more duplicates. We acknowledge it and do nothing.
+
+---
+
+## Phase 3: Health-aware routing and failover
+
+**What we built:** A health tracker in Redis for every **(gateway, payment method)** pair, a router that skips degraded routes, failover inside a single request, and `GET /admin/routing/health`.
+
+**Key idea (analogy):** A house fuse box with one fuse per room, not one for the whole house. Each (gateway, method) pair is a **circuit breaker**:
+- **healthy**: normal traffic.
+- **degraded** ("tripped"): success rate fell below 80% over at least 5 calls. No traffic for a cooldown period.
+- **probing** ("half-open"): after the cooldown, a small share of traffic tests whether it has recovered.
+- Two or three probes in a row succeed: back to healthy. One probe fails: degraded again.
+
+**Why per method:** A NIBSS outage breaks bank transfers on *every* gateway at once while cards keep working. A per-gateway breaker would either kill cards needlessly or keep sending transfers into a black hole. When a method is down on every gateway, the API answers `503 METHOD_UNAVAILABLE` and suggests the method that still works (for example "try card").
+
+**Anti flip-flop rules:** a minimum sample size (one blip can't trip it), a cooldown (no instant retry), consecutive successful probes to recover, and a fresh window after recovery. Also, a route isn't *ranked* below others until it has enough samples. Otherwise one early failure would push it to the back forever, and it would never get the traffic it needs to prove itself again (I found this while writing the tests).
+
+**Bug it prevents:** Every customer waiting for a dead gateway to time out; a whole gateway being blacklisted because only one of its rails is down; routing that oscillates every few seconds.
+
+**Interview question:** *"How do you stop a failover system from flip-flopping?"* Hysteresis: require enough evidence to trip (minimum samples plus a threshold), wait a cooldown before retrying, require several consecutive successes to recover, and only send probe traffic while half-open.

@@ -20,7 +20,7 @@ export class HealthAwareRouter implements GatewayRouter {
   constructor(
     private readonly registry: GatewayRegistry,
     private readonly redis: Redis,
-    config: Env,
+    private readonly config: Env,
   ) {
     this.tracker = new HealthTracker(redis, config);
   }
@@ -33,9 +33,16 @@ export class HealthAwareRouter implements GatewayRouter {
         .map((g) => this.tracker.health(g.name, method)),
     );
 
+    // A route isn't judged until it has MIN_SAMPLES results: with less evidence it
+    // counts as 100% (otherwise one early failure would push it to the back forever,
+    // it would get no more traffic, and its score could never recover).
+    const minSamples = this.config.ROUTING_MIN_SAMPLES;
+    const score = (r: RouteHealth) => (r.samples >= minSamples ? (r.successRate ?? 1) : 1);
+    const latency = (r: RouteHealth) => (r.samples >= minSamples ? (r.avgLatencyMs ?? 0) : 0);
+    // Array.sort is stable, so ties keep registry order (the configured priority).
     const healthy = routes
       .filter((r) => r.state === 'healthy')
-      .sort((a, b) => (b.successRate ?? 1) - (a.successRate ?? 1) || (a.avgLatencyMs ?? 0) - (b.avgLatencyMs ?? 0))
+      .sort((a, b) => score(b) - score(a) || latency(a) - latency(b))
       .map((r) => r.gateway);
     const probing = routes.filter((r) => r.state === 'probing').map((r) => r.gateway);
 

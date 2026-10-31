@@ -20,10 +20,20 @@ export async function resetDatabase(ctx: AppContext) {
   if (!ctx.config.DATABASE_URL.includes('payments_test')) {
     throw new Error('Refusing to reset a database that is not the test database');
   }
-  await ctx.prisma.$executeRawUnsafe(`
-    TRUNCATE postings, journal_entries, withdrawals, payment_attempts, payments, accounts, merchants,
-      idempotency_keys, webhook_events, gateway_settlements, discrepancies, reconciliation_runs
-    RESTART IDENTITY CASCADE`);
+  // A webhook from the previous test may still be settling in the worker. TRUNCATE
+  // needs an exclusive lock, so Postgres can report a deadlock (40P01): just retry.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await ctx.prisma.$executeRawUnsafe(`
+        TRUNCATE postings, journal_entries, withdrawals, payment_attempts, payments, accounts, merchants,
+          idempotency_keys, webhook_events, gateway_settlements, discrepancies, reconciliation_runs
+        RESTART IDENTITY CASCADE`);
+      break;
+    } catch (err) {
+      if (attempt >= 10 || !String(err).includes('40P01')) throw err;
+      await new Promise((r) => setTimeout(r, 100 * attempt));
+    }
+  }
   // Clear routing health only. Queue keys are left alone: wiping them while a
   // worker holds a job produces confusing "missing key" errors.
   const keys = await ctx.redis.keys('po:health:*');

@@ -5,7 +5,8 @@ import { randomUUID } from 'node:crypto';
 import { pinoHttp } from 'pino-http';
 import type { AppContext } from './context';
 import { bigintReplacer } from './lib/money';
-import { merchantAuth } from './middleware/auth';
+import { adminAuth, merchantAuth } from './middleware/auth';
+import { routingRoutes } from './modules/routing/routing.routes';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { globalLimiter } from './middleware/rateLimit';
 import { paymentRoutes } from './modules/payments/payment.routes';
@@ -53,6 +54,12 @@ export function createApp(ctx: AppContext): Express {
   v1.use(paymentRoutes(ctx));
   v1.use(withdrawalRoutes(ctx));
   app.use('/v1', v1);
+
+  // ---- Admin API for the dashboard (X-Admin-Key) ----
+  const admin = express.Router();
+  admin.use(adminAuth(ctx));
+  admin.use(routingRoutes(ctx));
+  app.use('/admin', admin);
 
   app.get('/health', async (_req, res) => {
     const checks = { database: 'ok', redis: 'ok' };

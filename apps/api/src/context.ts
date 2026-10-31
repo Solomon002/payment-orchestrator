@@ -9,7 +9,7 @@ import { env, type Env } from './lib/env';
 import { logger } from './lib/logger';
 import { GatewayRegistry, registryFromEnv } from './modules/gateways/registry';
 import type { GatewayRouter } from './modules/routing/router.types';
-import { StaticRouter } from './modules/routing/static.router';
+import { HealthAwareRouter } from './modules/routing/health.router';
 import { createQueues, type Queues } from './queues/queues';
 
 export interface AppContext {
@@ -39,7 +39,8 @@ export function createContext(options: ContextOptions = {}): AppContext {
   const queues = createQueues(config.REDIS_URL);
 
   const base = { config, log, prisma, redis, gateways, queues };
-  const router = options.router ? options.router(base) : new StaticRouter(gateways);
+  // Default: health-aware routing with per-(gateway, method) circuit breakers.
+  const router = options.router ? options.router(base) : new HealthAwareRouter(gateways, redis, config);
   return { ...base, router };
 }
 
