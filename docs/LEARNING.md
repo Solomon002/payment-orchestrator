@@ -126,3 +126,27 @@ Note that the naive run did not break the ledger's zero-sum rule: every entry ba
 **Bug it prevents:** Silent money leaks that nobody notices until the year-end audit.
 
 **Interview question:** *"If you have idempotency, webhooks and polling, why do you still need reconciliation?"* Because each of those can still be wrong in ways it can't detect itself: a gateway-side bug, a manual refund in the gateway's dashboard, a fee change, a webhook for a payment we never created. Reconciliation is the independent check that the two sets of books agree.
+
+---
+
+## Phase 5: Dashboard and simulator
+
+**What we built:** A React + Vite + Tailwind + TanStack Query admin dashboard (Overview, Payments with a ledger view per payment, Gateway Health, Webhooks, Reconciliation, Simulator) and the admin/simulator API behind it.
+
+**Key idea (analogy):** A flight simulator. Pilots practise engine failures on purpose so they recognise them instantly. The Simulator page breaks the mock gateways on purpose ("mockpay-a down", "NIBSS outage", "drop webhooks") so you can watch the circuit breakers, failover, poller and reconciliation react live.
+
+**Security detail:** The browser only holds the admin key (in session storage). The key that controls the mock gateways stays on the server, and the API forwards simulator commands. Simulator routes aren't mounted in production.
+
+**Interview question:** *"Why does the dashboard show 'Ledger check: Balanced'?"* It's the sum of every posting ever written. In a double-entry ledger that must be exactly zero; anything else means a bug wrote money that came from nowhere.
+
+---
+
+## Phase 6: Hardening, CI, docs and the demo
+
+**What we built:** `pnpm demo` (7 scripted scenarios on a scratch database), a GitHub Actions workflow running lint, typecheck, tests, the dashboard build and both demos against real Postgres and Redis, and the README, ARCHITECTURE, DECISIONS and WALKTHROUGH docs.
+
+**A bug found while writing the limitations list:** Reconciliation matched settlements to payments by reference only. If gateway A times out during failover but *did* charge the customer, and gateway B also succeeds, both settlements would "match", hiding a double charge. Now a settlement from a gateway that didn't complete the payment is flagged as `missing_in_ledger` ("possible double charge"), with a test.
+
+**Key idea:** Writing down the known limitations honestly is a design review in disguise.
+
+**Interview question:** *"What happens if a gateway times out but actually charged the customer?"* We fail over and may charge twice. Reconciliation catches it, because the same reference settles on two gateways, and a human refunds. A stronger design would verify with the first gateway before failing over, or use the same reference on both gateways so the gateway dedupes it.
