@@ -16,7 +16,7 @@ export const NORMAL_SIDE: Record<AccountType, NormalSide> = {
   gateway_clearing: NormalSide.debit,
   gateway_fees: NormalSide.debit,
   platform_revenue: NormalSide.credit,
-  payouts_clearing: NormalSide.debit,
+  payouts_clearing: NormalSide.credit,
   opening_balance: NormalSide.credit,
 };
 

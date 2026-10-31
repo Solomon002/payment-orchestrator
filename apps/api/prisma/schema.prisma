@@ -19,7 +19,7 @@ enum AccountType {
   gateway_clearing // money a gateway holds for us until settlement (asset)
   gateway_fees // fees gateways charge us (expense)
   platform_revenue // our fee income (revenue)
-  payouts_clearing // money on its way out to merchants' banks (asset)
+  payouts_clearing // merchant withdrawals committed but not yet paid out by the bank (liability)
   opening_balance // seed/top-up source used only for demos (equity)
 }
 

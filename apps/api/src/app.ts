@@ -5,7 +5,10 @@ import { randomUUID } from 'node:crypto';
 import { pinoHttp } from 'pino-http';
 import type { AppContext } from './context';
 import { bigintReplacer } from './lib/money';
+import { merchantAuth } from './middleware/auth';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
+import { globalLimiter } from './middleware/rateLimit';
+import { withdrawalRoutes } from './modules/withdrawals/withdrawal.routes';
 
 export function createApp(ctx: AppContext): Express {
   const app = express();
@@ -34,7 +37,15 @@ export function createApp(ctx: AppContext): Express {
     }),
   );
 
+  app.use(globalLimiter(ctx.config.RATE_LIMIT_GLOBAL_PER_MIN));
+
   app.use(express.json({ limit: '100kb' }));
+
+  // ---- Merchant API (Bearer API key) ----
+  const v1 = express.Router();
+  v1.use(merchantAuth(ctx));
+  v1.use(withdrawalRoutes(ctx));
+  app.use('/v1', v1);
 
   app.get('/health', async (_req, res) => {
     const checks = { database: 'ok', redis: 'ok' };
