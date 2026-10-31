@@ -24,7 +24,10 @@ export async function resetDatabase(ctx: AppContext) {
     TRUNCATE postings, journal_entries, withdrawals, payment_attempts, payments, accounts, merchants,
       idempotency_keys, webhook_events, gateway_settlements, discrepancies, reconciliation_runs
     RESTART IDENTITY CASCADE`);
-  await ctx.redis.flushdb();
+  // Clear routing health only. Queue keys are left alone: wiping them while a
+  // worker holds a job produces confusing "missing key" errors.
+  const keys = await ctx.redis.keys('po:health:*');
+  if (keys.length) await ctx.redis.del(...keys);
 }
 
 export async function merchantWithBalance(ctx: AppContext, balanceKobo: bigint) {

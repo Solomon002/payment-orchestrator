@@ -8,6 +8,8 @@ import { bigintReplacer } from './lib/money';
 import { merchantAuth } from './middleware/auth';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { globalLimiter } from './middleware/rateLimit';
+import { paymentRoutes } from './modules/payments/payment.routes';
+import { webhookRoutes } from './modules/webhooks/webhook.routes';
 import { withdrawalRoutes } from './modules/withdrawals/withdrawal.routes';
 
 export function createApp(ctx: AppContext): Express {
@@ -39,11 +41,16 @@ export function createApp(ctx: AppContext): Express {
 
   app.use(globalLimiter(ctx.config.RATE_LIMIT_GLOBAL_PER_MIN));
 
+  // Webhooks need the RAW body for signature checks, so they are mounted
+  // before the JSON parser below gets a chance to consume it.
+  app.use('/webhooks', webhookRoutes(ctx));
+
   app.use(express.json({ limit: '100kb' }));
 
   // ---- Merchant API (Bearer API key) ----
   const v1 = express.Router();
   v1.use(merchantAuth(ctx));
+  v1.use(paymentRoutes(ctx));
   v1.use(withdrawalRoutes(ctx));
   app.use('/v1', v1);
 

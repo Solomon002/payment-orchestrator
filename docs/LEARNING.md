@@ -65,3 +65,23 @@ Note that the naive run did not break the ledger's zero-sum rule: every entry ba
 **Bug it prevents:** Overdrafts under concurrent requests; double charges when a client retries after a timeout or a user double-clicks.
 
 **Interview question:** *"Why does the safe version re-read the balance after acquiring the lock, and why does that work under READ COMMITTED?"* Because the balance read before the lock may be stale. In READ COMMITTED, each statement takes a fresh snapshot, so the SELECT after the lock sees everything the previous lock holder committed.
+
+---
+
+## Phase 2: Payments, webhooks, queues and the polling fallback
+
+**What we built:** `POST /v1/payments` with a strict state machine, the gateway adapter interface (mock + Paystack test mode), the webhook endpoint (raw body, HMAC check, store, dedupe, enqueue, 200), a BullMQ worker with exponential backoff and a dead-letter queue, and a poller that recovers payments whose webhook never came.
+
+**Key idea 1, state machine (analogy):** A parcel's tracking status. "Delivered" never goes back to "out for delivery". `created -> pending -> succeeded | failed | expired`; terminal states are final. The update is a compare-and-set (`UPDATE ... WHERE status = 'pending'`), so two racing updates can't both win.
+
+**Key idea 2, webhooks:** The gateway calls *us*. We (1) check the HMAC-SHA512 signature over the raw bytes, because anyone can POST to our URL; (2) store the raw event; (3) dedupe with `UNIQUE(gateway, event_id)`; (4) put a job on the queue and answer 200 immediately. The worker does the slow part and **verifies with the gateway's API before moving money** ("trust, but verify").
+
+**Key idea 3, queues (analogy):** A restaurant. The waiter (API) takes the order and returns to the door; the kitchen (worker) cooks. If a dish fails, the kitchen retries with growing pauses (1s, 2s, 4s...: exponential backoff). Orders that fail every retry go to a "problem orders" shelf (the dead-letter queue) for a human.
+
+**Key idea 4, polling fallback:** Webhooks are not guaranteed. If one never arrives, the poller asks the gateway "what happened to payment X?", like checking the tracking page when the delivery SMS never came.
+
+**Bugs it prevents:** Crediting a merchant twice for a resent webhook; trusting a forged webhook; a payment stuck "pending" forever because a webhook was lost; a late "failed" event undoing a success.
+
+**Proved by tests:** duplicate webhook processed once; bad signature rejected (stored as `rejected`, no money moves); dropped webhook recovered by the poller; a late webhook after the poller already settled changes nothing; illegal transitions throw.
+
+**Interview question:** *"Why return 200 to a duplicate webhook instead of 409?"* Because the gateway did nothing wrong. A non-2xx tells it to retry, which creates even more duplicates. We acknowledge it and do nothing.
