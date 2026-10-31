@@ -1,6 +1,7 @@
 import { Worker } from 'bullmq';
 import type { AppContext } from '../context';
 import { markWebhookDeadLettered, processWebhookEvent } from '../modules/webhooks/webhook.processor';
+import { runNightlyReconciliation } from '../modules/reconciliation/reconciliation.service';
 import { pollPendingPayments } from './poller';
 import { bullConnection, QUEUE_NAMES, QUEUE_PREFIX } from './queues';
 
@@ -35,6 +36,10 @@ export function startWorkers(ctx: AppContext, extraMaintenance: Record<string, M
     QUEUE_NAMES.maintenance,
     async (job) => {
       if (job.name === 'poll-pending') return pollPendingPayments(ctx);
+      if (job.name === 'reconcile-nightly') {
+        const run = await runNightlyReconciliation(ctx);
+        return { runId: run.id, totals: run.totals };
+      }
       const handler = extraMaintenance[job.name];
       if (handler) return handler(ctx, job.name);
       throw new Error(`Unknown maintenance job ${job.name}`);
@@ -60,5 +65,10 @@ export async function scheduleRecurringJobs(ctx: AppContext) {
     'poll-pending',
     { every: ctx.config.POLL_INTERVAL_MS },
     { name: 'poll-pending', opts: { removeOnComplete: { count: 50 }, removeOnFail: { count: 50 } } },
+  );
+  await ctx.queues.maintenance.upsertJobScheduler(
+    'reconcile-nightly',
+    { pattern: ctx.config.RECONCILIATION_CRON, tz: ctx.config.RECONCILIATION_TZ },
+    { name: 'reconcile-nightly', opts: { removeOnComplete: { count: 30 }, removeOnFail: { count: 30 } } },
   );
 }

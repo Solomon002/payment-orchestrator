@@ -105,3 +105,24 @@ Note that the naive run did not break the ledger's zero-sum rule: every entry ba
 **Bug it prevents:** Every customer waiting for a dead gateway to time out; a whole gateway being blacklisted because only one of its rails is down; routing that oscillates every few seconds.
 
 **Interview question:** *"How do you stop a failover system from flip-flopping?"* Hysteresis: require enough evidence to trip (minimum samples plus a threshold), wait a cooldown before retrying, require several consecutive successes to recover, and only send probe traffic while half-open.
+
+---
+
+## Phase 4: Reconciliation
+
+**What we built:** A settlement importer (pulls each mock gateway's settlement report; CSV upload for gateways without an API, like Paystack in this project), a reconciliation engine, `POST /admin/reconciliation/run` for on-demand runs, and a nightly BullMQ cron job (02:00 Africa/Lagos, 48-hour look-back).
+
+**Key idea (analogy):** Checking your bank statement against your own notes at the end of the month. Every line should appear in both lists with the same amount. Anything that doesn't is written down as a **discrepancy** for a human to investigate, never "auto-fixed".
+
+| Type | Meaning | Typical real cause |
+|---|---|---|
+| `missing_in_ledger` | Gateway settled money we have no payment for | Payment created outside our system, or a bug that lost a record |
+| `missing_in_gateway` | We think it succeeded; the gateway's report doesn't have it | Settlement delayed, or we credited a merchant for money we never received |
+| `amount_mismatch` | Both sides have it, amounts or fees differ | Fee changes, partial captures, currency/rounding bugs |
+| `status_mismatch` | Gateway settled it, we still say pending/failed | Lost webhook not yet caught by the poller |
+
+**Detail that matters:** we compare against the **ledger postings** (gateway_clearing + gateway_fees of the "succeeded" entry), not just the payments table, so a ledger bug would be caught too. Lookups match by reference regardless of the time window, so a payment at 23:59 settled at 00:01 isn't flagged on either side.
+
+**Bug it prevents:** Silent money leaks that nobody notices until the year-end audit.
+
+**Interview question:** *"If you have idempotency, webhooks and polling, why do you still need reconciliation?"* Because each of those can still be wrong in ways it can't detect itself: a gateway-side bug, a manual refund in the gateway's dashboard, a fee change, a webhook for a payment we never created. Reconciliation is the independent check that the two sets of books agree.

@@ -6,6 +6,7 @@ import { pinoHttp } from 'pino-http';
 import type { AppContext } from './context';
 import { bigintReplacer } from './lib/money';
 import { adminAuth, merchantAuth } from './middleware/auth';
+import { reconciliationRoutes } from './modules/reconciliation/reconciliation.routes';
 import { routingRoutes } from './modules/routing/routing.routes';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { globalLimiter } from './middleware/rateLimit';
@@ -59,6 +60,7 @@ export function createApp(ctx: AppContext): Express {
   const admin = express.Router();
   admin.use(adminAuth(ctx));
   admin.use(routingRoutes(ctx));
+  admin.use(reconciliationRoutes(ctx));
   app.use('/admin', admin);
 
   app.get('/health', async (_req, res) => {
