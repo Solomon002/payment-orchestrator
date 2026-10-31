@@ -29,7 +29,7 @@ export class MockGatewayAdapter implements GatewayAdapter {
 
   constructor(
     readonly name: string,
-    private readonly baseUrl: string,
+    readonly baseUrl: string,
     private readonly secret: string,
     private readonly timeoutMs: number,
   ) {}

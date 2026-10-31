@@ -6,6 +6,8 @@ import { pinoHttp } from 'pino-http';
 import type { AppContext } from './context';
 import { bigintReplacer } from './lib/money';
 import { adminAuth, merchantAuth } from './middleware/auth';
+import { adminRoutes } from './modules/admin/admin.routes';
+import { simulatorRoutes } from './modules/admin/simulator.routes';
 import { reconciliationRoutes } from './modules/reconciliation/reconciliation.routes';
 import { routingRoutes } from './modules/routing/routing.routes';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
@@ -61,6 +63,8 @@ export function createApp(ctx: AppContext): Express {
   admin.use(adminAuth(ctx));
   admin.use(routingRoutes(ctx));
   admin.use(reconciliationRoutes(ctx));
+  admin.use(adminRoutes(ctx));
+  if (ctx.config.NODE_ENV !== 'production') admin.use(simulatorRoutes(ctx));
   app.use('/admin', admin);
 
   app.get('/health', async (_req, res) => {
