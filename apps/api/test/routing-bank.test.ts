@@ -88,6 +88,61 @@ describe('bank-level routing (breaker strategy)', () => {
   });
 });
 
+describe('hybrid strategy (production default)', () => {
+  let h: Harness;
+  let auth: Record<string, string>;
+  const tracker = () => (h.ctx.router as HealthAwareRouter).tracker;
+
+  beforeAll(async () => {
+    h = await startHarness({ config: { ...env(), ROUTING_STRATEGY: 'hybrid', ROUTING_COOLDOWN_MS: 60_000 }, log: silentLog, router: 'health' });
+  });
+  afterAll(() => h.close());
+  beforeEach(async () => {
+    await resetDatabase(h.ctx);
+    resetMocks(h);
+    auth = (await merchantWithBalance(h.ctx, 0n)).auth;
+  });
+
+  it('moves traffic off a failing gateway (Thompson ordering stops putting it first, often before its breaker even trips)', async () => {
+    h.mocks['mockpay-a'].control.failureRate = 100;
+    const firstTry: string[] = [];
+    for (let i = 0; i < 15; i++) {
+      const res = await pay(h, auth, 'card');
+      expect(res.status).toBe(201);
+      expect(res.body.payment.gateway).toBe('mockpay-b');
+      const first = await h.ctx.prisma.paymentAttempt.findFirst({ where: { paymentId: res.body.payment.id }, orderBy: { startedAt: 'asc' } });
+      firstTry.push(first!.gateway);
+    }
+    expect(firstTry.slice(5).filter((g) => g === 'mockpay-a').length).toBeLessThanOrEqual(2);
+  });
+
+  it('excludes a gateway once its breaker is degraded, whatever the Thompson ordering would prefer', async () => {
+    // Force the trip directly, then check the hybrid never offers that gateway.
+    for (let i = 0; i < 3; i++) await tracker().record('mockpay-a', 'card', false, 10);
+    expect((await tracker().health('mockpay-a', 'card')).state).toBe('degraded');
+    for (let i = 0; i < 10; i++) expect(await h.ctx.router.candidates('card', { amountKobo: 100_000 })).toEqual(['mockpay-b']);
+  });
+
+  it('routes one bank around a gateway while that gateway keeps serving other banks', async () => {
+    h.mocks['mockpay-a'].control.bankOutages = [GTB];
+    const firstTry: string[] = [];
+    for (let i = 0; i < 15; i++) {
+      const res = await pay(h, auth, 'bank_transfer', GTB);
+      expect(res.status).toBe(201);
+      const first = await h.ctx.prisma.paymentAttempt.findFirst({ where: { paymentId: res.body.payment.id }, orderBy: { startedAt: 'asc' } });
+      firstTry.push(first!.gateway);
+    }
+    // Most GTBank traffic moves off mockpay-a. Not all: the bank factor borrows evidence
+    // from GTBank on OTHER gateways (where it works), so Thompson keeps re-checking
+    // mockpay-a now and then. Each check costs one failed attempt; the customer still
+    // succeeds via failover. (A documented trade-off of the hybrid, see ROUTING-LAB.md.)
+    expect(firstTry.slice(5).filter((g) => g === 'mockpay-a').length).toBeLessThanOrEqual(4);
+    expect((await tracker().health('mockpay-a', 'bank_transfer')).state).toBe('healthy'); // gateway not blamed
+    // Other banks still get mockpay-a's (cheaper-for-them or better) route: it is offered for Zenith.
+    expect(await h.ctx.router.candidates('bank_transfer', { bankCode: ZENITH, amountKobo: 100_000 })).toContain('mockpay-a');
+  });
+});
+
 describe('Thompson sampling strategy', () => {
   let h: Harness;
   let auth: Record<string, string>;

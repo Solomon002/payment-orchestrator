@@ -74,11 +74,11 @@ async function main() {
 
   try {
     const { merchant, apiKey } = await createMerchant(ctx.prisma, 'Demo Store');
-    const pay = async (method: 'card' | 'bank_transfer', amountKobo = 500_000) => {
+    const pay = async (method: 'card' | 'bank_transfer', amountKobo = 500_000, bankCode?: string) => {
       const res = await fetch(`${h.url}/v1/payments`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}`, 'idempotency-key': randomUUID() },
-        body: JSON.stringify({ amountKobo, method, reference: `order-${randomUUID().slice(0, 8)}`, customerEmail: 'ada@example.com' }),
+        body: JSON.stringify({ amountKobo, method, reference: `order-${randomUUID().slice(0, 8)}`, customerEmail: 'ada@example.com', ...(bankCode ? { bankCode } : {}) }),
       });
       return { status: res.status, body: (await res.json()) as { payment?: { id: string; reference: string; gateway: string }; error?: { code: string; message: string; details?: { alternatives?: string[] } } } };
     };
@@ -99,7 +99,7 @@ async function main() {
 
     // 2. Duplicate webhooks
     step('2. Gateway sends every webhook THREE times (same event id)');
-    h.mocks['mockpay-a'].control.webhookMode = 'duplicate';
+    for (const gw of Object.values(h.mocks)) gw.control.webhookMode = 'duplicate';
     const p2 = await pay('card');
     await waitFor(async () => (await statusOf(p2.body.payment!.id)) === 'succeeded');
     const ev = await waitFor(async () => {
@@ -108,15 +108,19 @@ async function main() {
     });
     const entries = await ctx.prisma.journalEntry.count({ where: { reference: `payment:${p2.body.payment!.id}:succeeded` } });
     record('Duplicate webhook', entries === 1, `3 deliveries -> 1 stored event (${ev.duplicateCount} duplicates ignored), money posted ${entries} time`);
-    h.mocks['mockpay-a'].control.webhookMode = 'normal';
+    for (const gw of Object.values(h.mocks)) gw.control.webhookMode = 'normal';
 
     // 3a. One gateway down
     step('3a. mockpay-a starts failing every request (HTTP 503)');
     h.mocks['mockpay-a'].control.failureRate = 100;
+    const tracker = (ctx.router as HealthAwareRouter).tracker;
     const routed: string[] = [];
-    for (let i = 0; i < 4; i++) routed.push((await pay('card')).body.payment?.gateway ?? 'none');
-    const aState = (await (ctx.router as HealthAwareRouter).tracker.health('mockpay-a', 'card')).state;
-    note(`4 card payments routed to: ${routed.join(', ')}; mockpay-a/card is now "${aState}"`);
+    // Keep paying until the breaker has seen enough failures to trip (order varies under the hybrid strategy).
+    while (routed.length < 15 && (await tracker.health('mockpay-a', 'card')).state !== 'degraded') {
+      routed.push((await pay('card')).body.payment?.gateway ?? 'none');
+    }
+    const aState = (await tracker.health('mockpay-a', 'card')).state;
+    note(`${routed.length} card payments routed to: ${routed.join(', ')}; mockpay-a/card is now "${aState}"`);
     record('Gateway failover', routed.every((g) => g === 'mockpay-b') && aState === 'degraded', `all traffic failed over to mockpay-b; mockpay-a card route ${aState}`);
     h.mocks['mockpay-a'].control.failureRate = 0;
 
@@ -136,6 +140,26 @@ async function main() {
     );
     h.mocks['mockpay-a'].control.methodOutages.bank_transfer = false;
     h.mocks['mockpay-b'].control.methodOutages.bank_transfer = false;
+
+    // 3c. One bank failing on one gateway
+    step('3c. GTBank (058) transfers fail on mockpay-a only; other banks and gateways are fine');
+    await tracker.reset(); // start from clean routing health (3b left the transfer routes degraded)
+    h.mocks['mockpay-a'].control.bankOutages = ['058'];
+    const gtb: number[] = [];
+    while (gtb.length < 15 && (await tracker.health('mockpay-a', 'bank_transfer', '058')).state !== 'degraded') {
+      gtb.push((await pay('bank_transfer', 500_000, '058')).status);
+    }
+    const bankRoute = (await tracker.health('mockpay-a', 'bank_transfer', '058')).state;
+    const gatewayRoute = (await tracker.health('mockpay-a', 'bank_transfer')).state;
+    const zenith = await pay('bank_transfer', 500_000, '057');
+    note(`${gtb.length} GTBank transfers: all ${gtb.every((s) => s === 201) ? 'succeeded (failed over)' : 'NOT all succeeded'}`);
+    note(`mockpay-a + GTBank route: "${bankRoute}"; mockpay-a + bank_transfer for everyone else: "${gatewayRoute}"; a Zenith transfer -> ${zenith.status}`);
+    record(
+      'Bank-level health',
+      gtb.every((s) => s === 201) && bankRoute === 'degraded' && gatewayRoute === 'healthy' && zenith.status === 201,
+      'only the GTBank route on mockpay-a was cut off; the gateway stayed healthy for other banks',
+    );
+    h.mocks['mockpay-a'].control.bankOutages = [];
 
     // 4. Dropped webhook
     step('4. Webhook is never delivered (dropped)');

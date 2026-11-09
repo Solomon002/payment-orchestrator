@@ -10,7 +10,10 @@ import { merchantWithBalance, resetDatabase, silentLog } from './helpers';
 
 let h: Harness;
 let auth: Record<string, string>;
-const config = env(); // test settings: MIN_SAMPLES=3, MIN_SUCCESS_RATE=0.8, COOLDOWN=300ms, PROBE_SUCCESSES=2
+// Test settings: MIN_SAMPLES=3, MIN_SUCCESS_RATE=0.8, PROBE_SUCCESSES=2. A long cooldown so a
+// degraded route can't drift into 'probing' mid-test on a slow machine; the recovery
+// test below uses its own harness with a short cooldown.
+const config = { ...env(), ROUTING_COOLDOWN_MS: 60_000 };
 
 const pay = (method: 'card' | 'bank_transfer' = 'card') =>
   request(h.url)
@@ -116,19 +119,35 @@ describe('routing + failover', () => {
   });
 
   it('recovers: after the cooldown a fixed gateway is probed and returns to healthy', async () => {
-    h.mocks['mockpay-a'].control.failureRate = 100;
-    for (let i = 0; i < 3; i++) await pay();
-    expect(await routeState('mockpay-a', 'card')).toBe('degraded');
+    const cooldown = 1_500;
+    const r = await startHarness({ config: { ...config, ROUTING_COOLDOWN_MS: cooldown }, log: silentLog, router: 'health' });
+    try {
+      for (const gw of Object.values(r.mocks)) Object.assign(gw.control, { latencyMs: 5, completionDelayMs: 50 });
+      const a = (await merchantWithBalance(r.ctx, 0n)).auth;
+      const payR = () =>
+        request(r.url)
+          .post('/v1/payments')
+          .set(a)
+          .set('idempotency-key', randomUUID())
+          .send({ amountKobo: 100_000, method: 'card', reference: `r-${randomUUID()}`, customerEmail: 'ada@example.com' });
+      const stateR = async () => (await (r.ctx.router as HealthAwareRouter).tracker.health('mockpay-a', 'card')).state;
 
-    h.mocks['mockpay-a'].control.failureRate = 0; // gateway fixed
-    await new Promise((r) => setTimeout(r, config.ROUTING_COOLDOWN_MS + 50));
-    expect(await routeState('mockpay-a', 'card')).toBe('probing');
+      r.mocks['mockpay-a'].control.failureRate = 100;
+      for (let i = 0; i < 3; i++) await payR();
+      expect(await stateR()).toBe('degraded');
 
-    // Force traffic onto the probing route by breaking mockpay-b.
-    h.mocks['mockpay-b'].control.failureRate = 100;
-    await pay();
-    await pay();
-    expect(await routeState('mockpay-a', 'card')).toBe('healthy');
+      r.mocks['mockpay-a'].control.failureRate = 0; // gateway fixed
+      await new Promise((res) => setTimeout(res, cooldown + 100));
+      expect(await stateR()).toBe('probing');
+
+      // Force traffic onto the probing route by breaking mockpay-b.
+      r.mocks['mockpay-b'].control.failureRate = 100;
+      await payR();
+      await payR();
+      expect(await stateR()).toBe('healthy');
+    } finally {
+      await r.close();
+    }
   });
 
   it('exposes routing health to admins only', async () => {

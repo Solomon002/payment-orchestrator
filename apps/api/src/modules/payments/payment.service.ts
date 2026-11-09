@@ -20,6 +20,7 @@ import { feeFromBps, koboToNumber } from '../../lib/money';
 import { ensureGatewayAccounts, ensureMerchantAccounts, ensureSystemAccounts } from '../ledger/accounts';
 import { postJournalEntry, type PostingInput } from '../ledger/ledger.service';
 import { GatewayError } from '../gateways/gateway.types';
+import type { RouteOutcome } from '../routing/router.types';
 import { isTerminal, transition } from './payment.state';
 
 export class MethodUnavailableError extends AppError {
@@ -62,6 +63,27 @@ async function alternativesFor(ctx: AppContext, method: PaymentMethod, bankCode?
   const available: PaymentMethod[] = [];
   for (const m of others) if ((await ctx.router.candidates(m, { bankCode })).length > 0) available.push(m);
   return available;
+}
+
+/** Health bookkeeping is best-effort: a Redis problem must never fail (or re-route) a payment. */
+async function recordRouteResult(ctx: AppContext, outcome: RouteOutcome) {
+  try {
+    await ctx.router.recordResult(outcome);
+  } catch (err) {
+    ctx.log.error({ err, gateway: outcome.gateway }, 'failed to record routing health');
+  }
+}
+
+/** Retries transient database errors (e.g. "unable to start a transaction in the given time"). */
+async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+  for (let i = 1; ; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (i >= attempts || err instanceof AppError) throw err;
+      await new Promise((r) => setTimeout(r, 100 * i));
+    }
+  }
 }
 
 function pendingReversal(paymentsPending: string, merchantPending: string, amount: bigint): PostingInput[] {
@@ -130,28 +152,19 @@ export async function createPayment(ctx: AppContext, merchantId: string, input: 
       data: { paymentId: payment.id, gateway: gatewayName, method: input.method, status: 'initiated' },
     });
     const started = Date.now();
+
+    // ONLY the gateway call is inside this try. Anything that goes wrong after the
+    // gateway has accepted the charge (our database, Redis...) must NOT cause a
+    // failover: that would charge the customer a second time on another gateway.
+    let result: Awaited<ReturnType<typeof adapter.initialize>>;
     try {
-      const result = await adapter.initialize({
+      result = await adapter.initialize({
         reference: payment.reference,
         amountKobo: koboToNumber(amount),
         email: input.customerEmail,
         method: input.method,
         bankCode: input.bankCode,
       });
-      const latencyMs = Date.now() - started;
-      await ctx.router.recordResult({ gateway: gatewayName, method: input.method, bankCode: input.bankCode, ok: true, latencyMs });
-      await ctx.prisma.$transaction(async (tx) => {
-        await tx.paymentAttempt.update({
-          where: { id: attempt.id },
-          data: { gatewayReference: result.gatewayReference, latencyMs, finishedAt: new Date() },
-        });
-        await transition(tx, payment.id, 'created', 'pending', {
-          selectedGateway: gatewayName,
-          checkoutUrl: result.checkoutUrl,
-        });
-      });
-      const fresh = await ctx.prisma.payment.findUniqueOrThrow({ where: { id: payment.id } });
-      return { status: 201, payment: presentPayment(fresh), attempts: errors.length + 1 };
     } catch (err) {
       const latencyMs = Date.now() - started;
       const message = err instanceof Error ? err.message : String(err);
@@ -166,9 +179,31 @@ export async function createPayment(ctx: AppContext, merchantId: string, input: 
       // Unhealthy or unreachable: count it against the route (the gateway, or the
       // customer's bank behind it, depending on the error) and fail over.
       const scope = err instanceof GatewayError ? err.scope : 'gateway';
-      await ctx.router.recordResult({ gateway: gatewayName, method: input.method, bankCode: input.bankCode, ok: false, latencyMs, scope });
+      await recordRouteResult(ctx, { gateway: gatewayName, method: input.method, bankCode: input.bankCode, ok: false, latencyMs, scope });
       ctx.log.warn({ gateway: gatewayName, method: input.method, err: message }, 'gateway failed, failing over');
+      continue;
     }
+
+    // The gateway accepted the charge: this payment is now committed to this gateway.
+    const latencyMs = Date.now() - started;
+    await recordRouteResult(ctx, { gateway: gatewayName, method: input.method, bankCode: input.bankCode, ok: true, latencyMs });
+    await withRetry(() =>
+      ctx.prisma.$transaction(
+        async (tx) => {
+          await tx.paymentAttempt.update({
+            where: { id: attempt.id },
+            data: { gatewayReference: result.gatewayReference, latencyMs, finishedAt: new Date() },
+          });
+          await transition(tx, payment.id, 'created', 'pending', {
+            selectedGateway: gatewayName,
+            checkoutUrl: result.checkoutUrl,
+          });
+        },
+        { maxWait: 10_000, timeout: 10_000 },
+      ),
+    );
+    const fresh = await ctx.prisma.payment.findUniqueOrThrow({ where: { id: payment.id } });
+    return { status: 201, payment: presentPayment(fresh), attempts: errors.length + 1 };
   }
 
   // 3. Every candidate failed: fail the payment and release the pending amount.

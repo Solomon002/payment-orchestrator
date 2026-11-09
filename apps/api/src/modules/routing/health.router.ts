@@ -4,7 +4,8 @@ import {
   DEFAULT_THOMPSON,
   expectedSuccess,
   orderByBreaker,
-  orderByThompson,
+  orderHybrid,
+  rankByThompson,
   sumCounts,
   type ThompsonConfig,
   type ThompsonRoute,
@@ -22,9 +23,12 @@ export interface RouteView extends RouteHealth {
 
 /**
  * Health-aware routing with a switchable strategy (ROUTING_STRATEGY):
- *  - breaker:       circuit breaker per route; degraded routes excluded
- *  - thompson:      Thompson sampling, maximise P(success)
- *  - thompson_cost: Thompson sampling, maximise P(success) x (amount - fee)
+ *  - hybrid (default): the breaker decides which routes are alive (degraded excluded,
+ *                   careful probing); Thompson sampling orders the healthy ones by
+ *                   P(success) x (amount - fee)
+ *  - breaker:       circuit breaker only
+ *  - thompson:      Thompson sampling, maximise P(success), bounded exploration
+ *  - thompson_cost: Thompson sampling, maximise P(success) x (amount - fee), bounded exploration
  * Both levels (gateway+method, gateway+method+bank) feed every strategy.
  * docs/ROUTING-LAB.md compares the strategies in simulation.
  */
@@ -43,6 +47,7 @@ export class HealthAwareRouter implements GatewayRouter {
       ...DEFAULT_THOMPSON,
       halfLifeMs: config.ROUTING_TS_HALF_LIFE_MS,
       minViableRate: config.ROUTING_MIN_VIABLE_RATE,
+      probeIntervalMs: config.ROUTING_TS_PROBE_INTERVAL_MS,
     };
   }
 
@@ -56,17 +61,18 @@ export class HealthAwareRouter implements GatewayRouter {
     const gm = await Promise.all(gateways.map((g) => this.tracker.health(g.name, method)));
     const bank = bankCode ? await Promise.all(gateways.map((g) => this.tracker.health(g.name, method, bankCode))) : null;
 
+    // A route is only as healthy as its worst level.
+    const breakerRoutes = gateways.map((g, i) => ({
+      gateway: g.name,
+      state: combineStates([gm[i]!.state, ...(bank ? [bank[i]!.state] : [])]),
+      samples: gm[i]!.samples,
+      successRate: gm[i]!.successRate,
+      avgLatencyMs: gm[i]!.avgLatencyMs,
+    }));
+    const callNumber = () => this.redis.incr(`po:health:probe-counter:${method}`);
+
     if (this.strategy === 'breaker') {
-      // A route is only as healthy as its worst level.
-      const routes = gateways.map((g, i) => ({
-        gateway: g.name,
-        state: combineStates([gm[i]!.state, ...(bank ? [bank[i]!.state] : [])]),
-        samples: gm[i]!.samples,
-        successRate: gm[i]!.successRate,
-        avgLatencyMs: gm[i]!.avgLatencyMs,
-      }));
-      const n = await this.redis.incr(`po:health:probe-counter:${method}`);
-      return orderByBreaker(routes, this.config.ROUTING_MIN_SAMPLES, n);
+      return orderByBreaker(breakerRoutes, this.config.ROUTING_MIN_SAMPLES, await callNumber());
     }
 
     const now = Date.now();
@@ -81,7 +87,26 @@ export class HealthAwareRouter implements GatewayRouter {
       otherGatewaysBankCounts: bankCounts ? sumCounts(bankCounts.filter((_, j) => j !== i), now, this.thompson.halfLifeMs) : null,
       netValueKobo: request.amountKobo !== undefined ? request.amountKobo - g.estimateFeeKobo(request.amountKobo) : undefined,
     }));
-    return orderByThompson(this.random, routes, this.thompson, now, this.strategy === 'thompson_cost' ? 'net_revenue' : 'success');
+    if (this.strategy === 'hybrid') {
+      const healthy = new Set(breakerRoutes.filter((r) => r.state === 'healthy').map((r) => r.gateway));
+      const preferred = rankByThompson(this.random, routes.filter((r) => healthy.has(r.gateway)), this.thompson, now, 'net_revenue');
+      return orderHybrid(breakerRoutes, this.config.ROUTING_MIN_SAMPLES, await callNumber(), preferred.map((p) => p.gateway));
+    }
+
+    // Pure Thompson sampling with BOUNDED exploration: a route our posterior thinks is
+    // probably dead may only be tried as a probe, at most once per interval per route.
+    // SET NX PX is atomic, so with several API instances only one wins the probe slot.
+    const picks = rankByThompson(this.random, routes, this.thompson, now, this.strategy === 'thompson_cost' ? 'net_revenue' : 'success');
+    const order: string[] = [];
+    for (const p of picks) {
+      if (p.exploratory) {
+        const key = `po:health:probe-lock:${p.gateway}:${method}${p.probeLevel === 'bank' && bankCode ? `:${bankCode}` : ''}`;
+        const won = await this.redis.set(key, '1', 'PX', this.thompson.probeIntervalMs, 'NX');
+        if (won !== 'OK') continue;
+      }
+      order.push(p.gateway);
+    }
+    return order;
   }
 
   /**

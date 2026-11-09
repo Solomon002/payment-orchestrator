@@ -70,6 +70,8 @@ export interface ThompsonConfig {
   poolWeight: number;
   /** Routes whose sampled success probability is below this are skipped. */
   minViableRate: number;
+  /** Bounded exploration: at most one probe per suspect route per this interval. */
+  probeIntervalMs: number;
 }
 
 export const DEFAULT_THOMPSON: ThompsonConfig = {
@@ -78,6 +80,7 @@ export const DEFAULT_THOMPSON: ThompsonConfig = {
   bankPrior: { alpha: 19.8, beta: 0.2 }, // "banks usually work (~99%)", worth ~20 observations
   poolWeight: 0.5,
   minViableRate: 0.5,
+  probeIntervalMs: 10_000,
 };
 
 export interface ThompsonRoute {
@@ -124,12 +127,57 @@ export function sampleSuccess(rng: Rng, r: ThompsonRoute, cfg: ThompsonConfig, n
 
 export type ThompsonObjective = 'success' | 'net_revenue';
 
+export interface ThompsonPick {
+  gateway: string;
+  /** The Thompson draw of P(success). */
+  p: number;
+  score: number;
+  /**
+   * True when our posterior MEAN says this route is probably not viable and it
+   * only made the list because of a lucky draw. Such picks are probes.
+   */
+  exploratory: boolean;
+  /** Which level is suspect: 'gateway' (the gateway+method) or 'bank' (this bank via the gateway). */
+  probeLevel: 'gateway' | 'bank';
+}
+
 /**
- * Orders routes by one Thompson draw each.
+ * Ranks routes by one Thompson draw each.
  *  - 'success':     maximise the chance the payment succeeds
  *  - 'net_revenue': maximise expected merchant revenue = P(success) x (amount - fee),
  *                   so a cheaper gateway wins when success rates are close
  * Routes whose draw is below minViableRate are left out entirely.
+ */
+export function rankByThompson(
+  rng: Rng,
+  routes: ThompsonRoute[],
+  cfg: ThompsonConfig,
+  now: number,
+  objective: ThompsonObjective = 'success',
+): ThompsonPick[] {
+  return routes
+    .map((r) => {
+      const p = sampleSuccess(rng, r, cfg, now);
+      const gMean = betaMean(gatewayPosterior(r, cfg, now));
+      const bank = bankPosterior(r, cfg, now);
+      const mean = gMean * (bank ? betaMean(bank) : 1);
+      return {
+        gateway: r.gateway,
+        p,
+        score: objective === 'net_revenue' ? p * (r.netValueKobo ?? 1) : p,
+        exploratory: mean < cfg.minViableRate,
+        probeLevel: gMean < cfg.minViableRate ? ('gateway' as const) : ('bank' as const),
+      };
+    })
+    .filter((x) => x.p >= cfg.minViableRate)
+    .sort((a, b) => b.score - a.score);
+}
+
+/**
+ * Version 1 (kept for the lab's comparison): exploratory picks are always used.
+ * The routing lab showed the flaw: during a long outage nothing is learned,
+ * the old failures decay, the belief drifts back to "gateways usually work",
+ * and a large share of payments pile onto the dead route at once.
  */
 export function orderByThompson(
   rng: Rng,
@@ -138,12 +186,15 @@ export function orderByThompson(
   now: number,
   objective: ThompsonObjective = 'success',
 ): string[] {
-  return routes
-    .map((r) => {
-      const p = sampleSuccess(rng, r, cfg, now);
-      return { gateway: r.gateway, p, score: objective === 'net_revenue' ? p * (r.netValueKobo ?? 1) : p };
-    })
-    .filter((x) => x.p >= cfg.minViableRate)
-    .sort((a, b) => b.score - a.score)
-    .map((x) => x.gateway);
+  return rankByThompson(rng, routes, cfg, now, objective).map((x) => x.gateway);
+}
+
+/**
+ * Version 2, BOUNDED EXPLORATION (what production uses): an exploratory pick is
+ * kept only if `tryAcquireProbe` grants it a probe slot (at most one probe per
+ * suspect route per interval). Healthy routes are unaffected; a dead route gets
+ * a trickle of probes instead of a flood of payments.
+ */
+export function boundedThompsonOrder(picks: ThompsonPick[], tryAcquireProbe: (pick: ThompsonPick) => boolean): string[] {
+  return picks.filter((p) => !p.exploratory || tryAcquireProbe(p)).map((p) => p.gateway);
 }

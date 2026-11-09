@@ -25,4 +25,6 @@ Object.assign(process.env, {
   ROUTING_PROBE_SUCCESSES: '2',
   GATEWAY_TIMEOUT_MS: '1500',
   PENDING_POLL_AFTER_MS: '0',
+  // Deterministic routing for most tests; the hybrid and Thompson strategies have their own tests.
+  ROUTING_STRATEGY: 'breaker',
 });

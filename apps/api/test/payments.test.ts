@@ -192,6 +192,24 @@ describe('payments + webhooks', () => {
     ]);
   });
 
+  it('REGRESSION: an error in our own bookkeeping after the gateway accepted the charge never triggers failover (no double charge)', async () => {
+    // Found by `pnpm demo`: a slow DB transaction right after a successful initialize
+    // was treated as a gateway failure, so the payment was charged on BOTH gateways.
+    const original = h.ctx.router.recordResult.bind(h.ctx.router);
+    h.ctx.router.recordResult = async () => {
+      throw new Error('simulated Redis outage while recording health');
+    };
+    try {
+      const res = await pay();
+      expect(res.status).toBe(201);
+      const attempts = await h.ctx.prisma.paymentAttempt.findMany({ where: { paymentId: res.body.payment.id } });
+      expect(attempts.map((a) => a.gateway)).toEqual(['mockpay-a']); // never tried mockpay-b
+      expect(h.mocks['mockpay-b'].charges.has(res.body.payment.reference)).toBe(false); // and mockpay-b never charged this customer
+    } finally {
+      h.ctx.router.recordResult = original;
+    }
+  });
+
   it('when every gateway fails, returns 402 with a failed payment and a suggested alternative method', async () => {
     h.mocks['mockpay-a'].control.methodOutages.bank_transfer = true;
     h.mocks['mockpay-b'].control.methodOutages.bank_transfer = true;
