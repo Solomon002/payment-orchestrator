@@ -54,6 +54,30 @@ export const referenceSchema = z
   .max(100)
   .regex(/^[A-Za-z0-9._-]+$/, 'reference may only contain letters, digits, ".", "_" and "-"');
 
+// ---------- Banks ----------
+
+// Commonly used Nigerian bank codes (3-digit CBN/NIBSS codes, as gateways list
+// them). Used to label demo data and bank-level routing health.
+// VERIFY AGAINST OFFICIAL LISTS before relying on these for real payments.
+export const NG_BANKS = {
+  '044': 'Access Bank',
+  '058': 'GTBank',
+  '011': 'First Bank',
+  '033': 'UBA',
+  '057': 'Zenith Bank',
+  '035': 'Wema Bank',
+  '214': 'FCMB',
+  '070': 'Fidelity Bank',
+  '232': 'Sterling Bank',
+  '050': 'Ecobank',
+} as const;
+export type BankCode = keyof typeof NG_BANKS;
+export const bankName = (code: string | null | undefined) =>
+  code ? (NG_BANKS as Record<string, string>)[code] ?? `Bank ${code}` : 'Unknown bank';
+
+/** The customer's bank, as a 3-6 digit code. Optional on payments. */
+export const bankCodeSchema = z.string().regex(/^\d{3,6}$/, 'bankCode must be a 3-6 digit bank code');
+
 export const createPaymentSchema = z
   .object({
     amountKobo: amountKoboSchema,
@@ -61,6 +85,9 @@ export const createPaymentSchema = z
     method: paymentMethodSchema,
     reference: referenceSchema,
     customerEmail: z.string().email().max(254),
+    // The customer's bank (from the checkout, or the card's BIN). Lets routing
+    // learn that e.g. GTBank transfers are failing without blaming a whole gateway.
+    bankCode: bankCodeSchema.optional(),
   })
   .strict();
 export type CreatePaymentInput = z.infer<typeof createPaymentSchema>;
@@ -91,6 +118,8 @@ export const mockControlSchema = z
     // Percentage of charges the "customer" declines (a business failure, not a gateway error).
     declineRate: z.number().min(0).max(100),
     methodOutages: z.object({ card: z.boolean(), bank_transfer: z.boolean() }).strict(),
+    // Customer banks whose bank TRANSFERS fail on this gateway (HTTP 503 "bank_unavailable").
+    bankOutages: z.array(bankCodeSchema).max(50),
     webhookMode: z.enum(WEBHOOK_MODES),
     webhookDelayMs: z.number().int().min(0).max(300_000),
     // How long after initialize the mock "customer" completes the charge.

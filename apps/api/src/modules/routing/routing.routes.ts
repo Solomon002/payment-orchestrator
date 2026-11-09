@@ -11,8 +11,10 @@ export function routingRoutes(ctx: AppContext): Router {
       res.json({ mode: 'static', routes: [] });
       return;
     }
+    const snapshot = await ctx.router.snapshot();
     res.json({
       mode: 'health-aware',
+      strategy: ctx.router.strategy,
       thresholds: {
         windowSize: ctx.config.ROUTING_WINDOW_SIZE,
         minSamples: ctx.config.ROUTING_MIN_SAMPLES,
@@ -20,7 +22,8 @@ export function routingRoutes(ctx: AppContext): Router {
         cooldownMs: ctx.config.ROUTING_COOLDOWN_MS,
         probeSuccesses: ctx.config.ROUTING_PROBE_SUCCESSES,
       },
-      routes: await ctx.router.snapshot(),
+      routes: snapshot.routes,
+      bankRoutes: snapshot.bankRoutes,
     });
   });
 

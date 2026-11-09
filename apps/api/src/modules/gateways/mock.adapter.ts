@@ -32,7 +32,13 @@ export class MockGatewayAdapter implements GatewayAdapter {
     readonly baseUrl: string,
     private readonly secret: string,
     private readonly timeoutMs: number,
+    private readonly feeBps = 150,
+    private readonly feeCapKobo = 200_000,
   ) {}
+
+  estimateFeeKobo(amountKobo: number): number {
+    return Math.min(this.feeCapKobo, Math.floor((amountKobo * this.feeBps + 5_000) / 10_000));
+  }
 
   private headers() {
     return { 'content-type': 'application/json', authorization: `Bearer ${this.secret}` };
@@ -50,6 +56,7 @@ export class MockGatewayAdapter implements GatewayAdapter {
           amountKobo: input.amountKobo,
           email: input.email,
           method: input.method,
+          ...(input.bankCode ? { bankCode: input.bankCode } : {}),
         }),
       },
       this.timeoutMs,

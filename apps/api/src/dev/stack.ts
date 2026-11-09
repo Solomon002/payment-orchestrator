@@ -61,7 +61,7 @@ export async function startHarness(opts: {
     server.on('request', gw.app);
     mocks[name] = gw;
     mockServers.push(server);
-    adapters.push(new MockGatewayAdapter(name, mockUrl, secrets[name], opts.config.GATEWAY_TIMEOUT_MS));
+    adapters.push(new MockGatewayAdapter(name, mockUrl, secrets[name], opts.config.GATEWAY_TIMEOUT_MS, feeBps));
   }
 
   const ctx = createContext({

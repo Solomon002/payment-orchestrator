@@ -11,7 +11,7 @@
 //        Cr platform_revenue  P        our income
 //   2'. failed/expired -> reverse the pending pair only.
 // Every entry sums to zero, and each has a unique reference so it can never post twice.
-import type { CreatePaymentInput, PaymentMethod } from '@po/shared';
+import { bankName, type CreatePaymentInput, type PaymentMethod } from '@po/shared';
 import { Prisma, type Payment, type PaymentStatus } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import type { AppContext } from '../../context';
@@ -23,14 +23,15 @@ import { GatewayError } from '../gateways/gateway.types';
 import { isTerminal, transition } from './payment.state';
 
 export class MethodUnavailableError extends AppError {
-  constructor(method: PaymentMethod, alternatives: PaymentMethod[]) {
+  constructor(method: PaymentMethod, alternatives: PaymentMethod[], bankCode?: string) {
+    const what = bankCode ? `${method} from ${bankName(bankCode)} (${bankCode})` : method;
     super(
       503,
       'METHOD_UNAVAILABLE',
       alternatives.length
-        ? `${method} is temporarily unavailable on every gateway. Ask the customer to try: ${alternatives.join(', ')}.`
-        : `${method} is temporarily unavailable on every gateway, and no alternative method is available right now.`,
-      { method, alternatives },
+        ? `${what} is temporarily unavailable on every gateway. Ask the customer to try: ${alternatives.join(', ')}.`
+        : `${what} is temporarily unavailable on every gateway, and no alternative method is available right now.`,
+      { method, bankCode: bankCode ?? null, alternatives },
     );
   }
 }
@@ -56,10 +57,10 @@ export function presentPayment(p: Payment) {
   };
 }
 
-async function alternativesFor(ctx: AppContext, method: PaymentMethod): Promise<PaymentMethod[]> {
+async function alternativesFor(ctx: AppContext, method: PaymentMethod, bankCode?: string): Promise<PaymentMethod[]> {
   const others: PaymentMethod[] = method === 'card' ? ['bank_transfer'] : ['card'];
   const available: PaymentMethod[] = [];
-  for (const m of others) if ((await ctx.router.candidates(m)).length > 0) available.push(m);
+  for (const m of others) if ((await ctx.router.candidates(m, { bankCode })).length > 0) available.push(m);
   return available;
 }
 
@@ -78,9 +79,9 @@ function pendingReversal(paymentsPending: string, merchantPending: string, amoun
  * slow gateway block everything else.
  */
 export async function createPayment(ctx: AppContext, merchantId: string, input: CreatePaymentInput) {
-  const candidates = await ctx.router.candidates(input.method);
+  const candidates = await ctx.router.candidates(input.method, { bankCode: input.bankCode, amountKobo: input.amountKobo });
   if (candidates.length === 0) {
-    throw new MethodUnavailableError(input.method, await alternativesFor(ctx, input.method));
+    throw new MethodUnavailableError(input.method, await alternativesFor(ctx, input.method, input.bankCode), input.bankCode);
   }
 
   const amount = BigInt(input.amountKobo);
@@ -135,9 +136,10 @@ export async function createPayment(ctx: AppContext, merchantId: string, input: 
         amountKobo: koboToNumber(amount),
         email: input.customerEmail,
         method: input.method,
+        bankCode: input.bankCode,
       });
       const latencyMs = Date.now() - started;
-      await ctx.router.recordResult(gatewayName, input.method, true, latencyMs);
+      await ctx.router.recordResult({ gateway: gatewayName, method: input.method, bankCode: input.bankCode, ok: true, latencyMs });
       await ctx.prisma.$transaction(async (tx) => {
         await tx.paymentAttempt.update({
           where: { id: attempt.id },
@@ -161,8 +163,10 @@ export async function createPayment(ctx: AppContext, merchantId: string, input: 
       if (err instanceof GatewayError && err.kind === 'rejected') {
         break; // the request itself was refused; another gateway won't help
       }
-      // Unhealthy or unreachable: count it against this gateway+method and fail over.
-      await ctx.router.recordResult(gatewayName, input.method, false, latencyMs);
+      // Unhealthy or unreachable: count it against the route (the gateway, or the
+      // customer's bank behind it, depending on the error) and fail over.
+      const scope = err instanceof GatewayError ? err.scope : 'gateway';
+      await ctx.router.recordResult({ gateway: gatewayName, method: input.method, bankCode: input.bankCode, ok: false, latencyMs, scope });
       ctx.log.warn({ gateway: gatewayName, method: input.method, err: message }, 'gateway failed, failing over');
     }
   }
@@ -180,7 +184,7 @@ export async function createPayment(ctx: AppContext, merchantId: string, input: 
   const failed = await ctx.prisma.payment.findUniqueOrThrow({ where: { id: payment.id } });
   throw new AppError(402, 'PAYMENT_FAILED', 'No gateway could process this payment', {
     payment: presentPayment(failed),
-    alternatives: await alternativesFor(ctx, input.method),
+    alternatives: await alternativesFor(ctx, input.method, input.bankCode),
     gatewayErrors: errors,
   });
 }

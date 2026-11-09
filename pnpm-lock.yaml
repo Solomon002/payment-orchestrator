@@ -187,6 +187,9 @@ importers:
       '@po/mock-gateway':
         specifier: workspace:*
         version: link:../mock-gateway
+      '@po/routing':
+        specifier: workspace:*
+        version: link:../../packages/routing
       '@po/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -334,6 +337,25 @@ importers:
       supertest:
         specifier: ^7.1.4
         version: 7.3.1(supports-color@8.1.1)
+      tsx:
+        specifier: ^4.20.0
+        version: 4.23.15
+      typescript:
+        specifier: ~5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(supports-color@8.1.1)(tsx@4.23.15)
+
+  packages/routing:
+    dependencies:
+      '@po/shared':
+        specifier: workspace:*
+        version: link:../shared
+    devDependencies:
+      '@types/node':
+        specifier: ^22.18.0
+        version: 22.20.5
       tsx:
         specifier: ^4.20.0
         version: 4.23.15

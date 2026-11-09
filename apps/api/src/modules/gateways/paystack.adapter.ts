@@ -127,6 +127,16 @@ export class PaystackAdapter implements GatewayAdapter {
     return { eventId: `${event.event}:${event.data.id}`, eventType: event.event, reference: event.data.reference };
   }
 
+  /**
+   * VERIFY AGAINST OFFICIAL DOCS: Paystack's published local-card pricing has been
+   * 1.5% + NGN 100 (the NGN 100 waived under NGN 2,500), capped at NGN 2,000.
+   * Only used to rank gateways by cost; never charged or posted to the ledger.
+   */
+  estimateFeeKobo(amountKobo: number): number {
+    const fee = Math.floor((amountKobo * 150 + 5_000) / 10_000) + (amountKobo >= 250_000 ? 10_000 : 0);
+    return Math.min(200_000, fee);
+  }
+
   async fetchSettlements(): Promise<SettlementRow[] | null> {
     // Not implemented: I am not confident enough in Paystack's settlement API shape.
     // Reconcile Paystack by exporting settlements from the dashboard and using the CSV upload.

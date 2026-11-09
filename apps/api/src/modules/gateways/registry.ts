@@ -32,8 +32,8 @@ export class GatewayRegistry {
 /** Builds the gateways from configuration. Paystack is included only when a TEST key is set. */
 export function registryFromEnv(config: Env): GatewayRegistry {
   const adapters: GatewayAdapter[] = [
-    new MockGatewayAdapter('mockpay-a', config.MOCKPAY_A_URL, config.MOCKPAY_A_SECRET, config.GATEWAY_TIMEOUT_MS),
-    new MockGatewayAdapter('mockpay-b', config.MOCKPAY_B_URL, config.MOCKPAY_B_SECRET, config.GATEWAY_TIMEOUT_MS),
+    new MockGatewayAdapter('mockpay-a', config.MOCKPAY_A_URL, config.MOCKPAY_A_SECRET, config.GATEWAY_TIMEOUT_MS, 150),
+    new MockGatewayAdapter('mockpay-b', config.MOCKPAY_B_URL, config.MOCKPAY_B_SECRET, config.GATEWAY_TIMEOUT_MS, 140),
   ];
   if (config.PAYSTACK_SECRET_KEY) {
     adapters.push(new PaystackAdapter(config.PAYSTACK_SECRET_KEY, config.GATEWAY_TIMEOUT_MS, config.PAYSTACK_CALLBACK_URL));

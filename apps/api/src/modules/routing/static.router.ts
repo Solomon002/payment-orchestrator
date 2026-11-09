@@ -1,6 +1,6 @@
 import type { PaymentMethod } from '@po/shared';
 import type { GatewayRegistry } from '../gateways/registry';
-import type { GatewayRouter } from './router.types';
+import type { GatewayRouter, RouteOutcome } from './router.types';
 
 /**
  * The simplest possible router: every gateway that supports the method, in a
@@ -17,5 +17,5 @@ export class StaticRouter implements GatewayRouter {
       .map((g) => g.name);
   }
 
-  async recordResult(): Promise<void> {}
+  async recordResult(_outcome: RouteOutcome): Promise<void> {}
 }

@@ -13,6 +13,8 @@ export interface InitializeInput {
   amountKobo: number;
   email: string;
   method: PaymentMethod;
+  /** Customer's bank code, if known. */
+  bankCode?: string;
 }
 
 export interface InitializeResult {
@@ -48,6 +50,8 @@ export interface GatewayAdapter {
   parseWebhook(rawBody: Buffer): ParsedWebhook;
   /** Settlement report for reconciliation. Gateways without an API return null (use CSV upload). */
   fetchSettlements(): Promise<SettlementRow[] | null>;
+  /** Our best estimate of this gateway's fee, used by cost-aware routing. */
+  estimateFeeKobo(amountKobo: number): number;
 }
 
 /**
@@ -57,12 +61,20 @@ export interface GatewayAdapter {
  */
 export type GatewayErrorKind = 'unavailable' | 'timeout' | 'rejected';
 
+/**
+ * WHO failed, for routing health. A 'bank' failure (the customer's bank is down
+ * behind this gateway) must not count against the gateway as a whole; otherwise
+ * one bad bank would trip the gateway for every other bank's customers.
+ */
+export type FailureScope = 'gateway' | 'bank';
+
 export class GatewayError extends Error {
   constructor(
     public readonly gateway: string,
     public readonly kind: GatewayErrorKind,
     message: string,
     public readonly httpStatus?: number,
+    public readonly scope: FailureScope = 'gateway',
   ) {
     super(message);
     this.name = 'GatewayError';
@@ -82,7 +94,9 @@ export async function gatewayFetch(gateway: string, url: string, init: RequestIn
     throw new GatewayError(gateway, 'unavailable', `${gateway} unreachable: ${(err as Error).message}`);
   }
   if (res.status >= 500 || res.status === 429) {
-    throw new GatewayError(gateway, 'unavailable', `${gateway} answered HTTP ${res.status}`, res.status);
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    const scope: FailureScope = body?.error === 'bank_unavailable' ? 'bank' : 'gateway';
+    throw new GatewayError(gateway, 'unavailable', `${gateway} answered HTTP ${res.status}${body?.error ? ` (${body.error})` : ''}`, res.status, scope);
   }
   if (res.status >= 400) {
     const text = await res.text().catch(() => '');

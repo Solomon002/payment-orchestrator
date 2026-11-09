@@ -61,6 +61,11 @@ const envSchema = z
     ROUTING_COOLDOWN_MS: z.coerce.number().int().min(0).default(30_000),
     ROUTING_PROBE_SUCCESSES: z.coerce.number().int().min(1).default(3),
     GATEWAY_TIMEOUT_MS: z.coerce.number().int().min(100).default(5_000),
+    // breaker: circuit breaker per route. thompson: Thompson sampling (max success).
+    // thompson_cost: Thompson sampling maximising P(success) x (amount - fee). See docs/ROUTING-LAB.md.
+    ROUTING_STRATEGY: z.enum(['breaker', 'thompson', 'thompson_cost']).default('breaker'),
+    ROUTING_TS_HALF_LIFE_MS: z.coerce.number().int().min(1_000).default(60_000),
+    ROUTING_MIN_VIABLE_RATE: z.coerce.number().min(0).max(1).default(0.5),
 
     POLL_INTERVAL_MS: z.coerce.number().int().min(1_000).default(15_000),
     PENDING_POLL_AFTER_MS: z.coerce.number().int().min(0).default(30_000),

@@ -49,6 +49,18 @@ describe('mock gateway', () => {
     expect(card.status).toBe(200);
   });
 
+  it('simulates a single-bank outage with a distinct error code', async () => {
+    const { app } = make();
+    await request(app).put('/control').set('x-control-key', CONTROL).send({ bankOutages: ['058'] });
+    const gtb = await request(app).post('/charges').set('authorization', `Bearer ${SECRET}`).send({ ...charge, method: 'bank_transfer', bankCode: '058' });
+    const zenith = await request(app).post('/charges').set('authorization', `Bearer ${SECRET}`).send({ ...charge, method: 'bank_transfer', reference: 'ref_3', bankCode: '057' });
+    const gtbCard = await request(app).post('/charges').set('authorization', `Bearer ${SECRET}`).send({ ...charge, reference: 'ref_4', bankCode: '058' });
+    expect(gtbCard.status).toBe(200); // cards from the same bank still work
+    expect(gtb.status).toBe(503);
+    expect(gtb.body.error).toBe('bank_unavailable');
+    expect(zenith.status).toBe(200);
+  });
+
   it('rejects invalid control updates', async () => {
     const { app } = make();
     const res = await request(app).put('/control').set('x-control-key', CONTROL).send({ failureRate: 500 });

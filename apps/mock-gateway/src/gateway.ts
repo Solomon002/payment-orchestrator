@@ -6,6 +6,7 @@
 // latency, error rate, per-method outages, and webhook misbehaviour
 // (duplicate, delayed, dropped, wrong signature).
 import {
+  bankCodeSchema,
   mockControlPatchSchema,
   paymentMethodSchema,
   type MockControl,
@@ -42,6 +43,7 @@ export interface Charge {
   feeKobo: number;
   email: string;
   method: PaymentMethod;
+  bankCode: string | null;
   status: 'pending' | 'succeeded' | 'failed';
   createdAt: string;
   paidAt: string | null;
@@ -61,6 +63,7 @@ export const DEFAULT_CONTROL: MockControl = {
   failureRate: 0,
   declineRate: 0,
   methodOutages: { card: false, bank_transfer: false },
+  bankOutages: [],
   webhookMode: 'normal',
   webhookDelayMs: 5_000,
   completionDelayMs: 300,
@@ -71,6 +74,7 @@ const chargeInputSchema = z.object({
   amountKobo: z.number().int().positive(),
   email: z.string().email(),
   method: paymentMethodSchema,
+  bankCode: bankCodeSchema.optional(),
 });
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -231,6 +235,12 @@ export function createMockGateway(opts: MockGatewayOptions) {
       res.status(503).json({ error: 'method_unavailable', message: `${input.method} is currently unavailable` });
       return;
     }
+    // A specific bank's TRANSFERS failing on this gateway (its cards may still work).
+    // The distinct error code lets the orchestrator blame the BANK, not the gateway.
+    if (input.method === 'bank_transfer' && input.bankCode && control.bankOutages.includes(input.bankCode)) {
+      res.status(503).json({ error: 'bank_unavailable', bankCode: input.bankCode, message: `Bank ${input.bankCode} is currently unavailable` });
+      return;
+    }
     if (Math.random() * 100 < control.failureRate) {
       res.status(503).json({ error: 'gateway_error', message: 'Simulated gateway failure' });
       return;
@@ -250,6 +260,7 @@ export function createMockGateway(opts: MockGatewayOptions) {
       feeKobo: 0,
       email: input.email,
       method: input.method,
+      bankCode: input.bankCode ?? null,
       status: 'pending',
       createdAt: new Date().toISOString(),
       paidAt: null,

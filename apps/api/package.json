@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@po/mock-gateway": "workspace:*",
+    "@po/routing": "workspace:*",
     "@po/shared": "workspace:*",
     "@prisma/client": "~6.19.3",
     "bullmq": "^5.81.0",
