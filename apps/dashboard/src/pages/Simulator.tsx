@@ -1,4 +1,4 @@
-import { WEBHOOK_MODES, type MockControlPatch, type PaymentMethod } from '@po/shared';
+import { bankName, NG_BANKS, WEBHOOK_MODES, type MockControlPatch, type PaymentMethod } from '@po/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Badge, Button, Card, cx, ErrorNote, inputClass, Mono } from '../components/ui';
@@ -7,6 +7,7 @@ import { naira, shortRef, time } from '../lib/format';
 import { RouteGrid } from './GatewayHealth';
 
 type GatewayName = 'mockpay-a' | 'mockpay-b';
+const DEMO_BANKS = Object.keys(NG_BANKS).slice(0, 6);
 
 function useSimulator() {
   const qc = useQueryClient();
@@ -83,6 +84,29 @@ function GatewayControls({ gw, onPatch }: { gw: MockGatewayState; onPatch: (patc
           </div>
         </div>
 
+        <div>
+          <div className="mb-1 text-sm">Bank outages (bank transfers only)</div>
+          <div className="flex flex-wrap gap-1.5">
+            {DEMO_BANKS.map((code) => {
+              const down = c.bankOutages.includes(code);
+              return (
+                <button
+                  key={code}
+                  aria-pressed={down}
+                  onClick={() => onPatch({ bankOutages: down ? c.bankOutages.filter((b) => b !== code) : [...c.bankOutages, code] })}
+                  className={cx(
+                    'rounded-full border px-2.5 py-1 text-xs font-medium',
+                    down ? 'border-rose-300 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-300' : 'border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-300',
+                  )}
+                >
+                  {bankName(code)}
+                  {down ? ': DOWN' : ''}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="text-sm">
             Webhook behaviour
@@ -131,6 +155,16 @@ const SCENARIOS: { label: string; description: string; patches: Partial<Record<G
     description: 'bank_transfer down on BOTH gateways; cards unaffected',
     patches: { 'mockpay-a': { methodOutages: { bank_transfer: true } }, 'mockpay-b': { methodOutages: { bank_transfer: true } } },
   },
+  {
+    label: 'GTBank down on mockpay-a',
+    description: 'GTBank transfers fail on mockpay-a only. Send bank transfers from GTBank: only that bank route is cut off',
+    patches: { 'mockpay-a': { bankOutages: ['058'] } },
+  },
+  {
+    label: 'GTBank down everywhere',
+    description: 'GTBank transfers fail on both gateways: fast "try card" for GTBank only',
+    patches: { 'mockpay-a': { bankOutages: ['058'] }, 'mockpay-b': { bankOutages: ['058'] } },
+  },
   { label: 'mockpay-a down', description: '100% errors on mockpay-a, watch traffic fail over to mockpay-b', patches: { 'mockpay-a': { failureRate: 100 } } },
   { label: 'Flaky mockpay-a', description: '40% errors: degrades, then probes', patches: { 'mockpay-a': { failureRate: 40 } } },
   { label: 'Duplicate webhooks', description: 'Every webhook sent 3x with the same event id', patches: { 'mockpay-a': { webhookMode: 'duplicate' }, 'mockpay-b': { webhookMode: 'duplicate' } } },
@@ -143,10 +177,11 @@ export function SimulatorPage() {
   const [method, setMethod] = useState<PaymentMethod>('card');
   const [count, setCount] = useState(10);
   const [amount, setAmount] = useState(500_000);
+  const [bank, setBank] = useState('mixed');
   const [lastFire, setLastFire] = useState<string | null>(null);
 
   const fire = useMutation({
-    mutationFn: () => post<{ requested: number; accepted: number; byGateway: Record<string, number>; errors: Record<string, number> }>('/admin/simulator/payments', { count, method, amountKobo: amount }),
+    mutationFn: () => post<{ requested: number; accepted: number; byGateway: Record<string, number>; errors: Record<string, number> }>('/admin/simulator/payments', { count, method, amountKobo: amount, ...(bank ? { bankCode: bank } : {}) }),
     onSuccess: (r) => {
       const routed = Object.entries(r.byGateway).map(([g, n]) => `${g}: ${n}`).join(', ') || 'none';
       const errs = Object.entries(r.errors).map(([c, n]) => `${c} ×${n}`).join(', ');
@@ -196,7 +231,7 @@ export function SimulatorPage() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card title="Fire test payments (demo merchant)">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label className="text-sm">
               Method
               <select className={`${inputClass} mt-1`} value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}>
@@ -212,6 +247,14 @@ export function SimulatorPage() {
               Amount
               <select className={`${inputClass} mt-1`} value={amount} onChange={(e) => setAmount(Number(e.target.value))}>
                 {[100_000, 500_000, 2_500_000, 10_000_000].map((k) => <option key={k} value={k}>{naira(k)}</option>)}
+              </select>
+            </label>
+            <label className="text-sm">
+              Customer bank
+              <select className={`${inputClass} mt-1`} value={bank} onChange={(e) => setBank(e.target.value)}>
+                <option value="mixed">Mixed (random bank each)</option>
+                <option value="">Not given</option>
+                {DEMO_BANKS.map((code) => <option key={code} value={code}>{bankName(code)} ({code})</option>)}
               </select>
             </label>
           </div>

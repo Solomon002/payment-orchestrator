@@ -115,13 +115,21 @@ async function main() {
     h.mocks['mockpay-a'].control.failureRate = 100;
     const tracker = (ctx.router as HealthAwareRouter).tracker;
     const routed: string[] = [];
-    // Keep paying until the breaker has seen enough failures to trip (order varies under the hybrid strategy).
-    while (routed.length < 15 && (await tracker.health('mockpay-a', 'card')).state !== 'degraded') {
-      routed.push((await pay('card')).body.payment?.gateway ?? 'none');
+    let triedAFirst = 0;
+    for (let i = 0; i < 10; i++) {
+      const res = await pay('card');
+      routed.push(res.body.payment?.gateway ?? 'none');
+      const first = await ctx.prisma.paymentAttempt.findFirst({ where: { paymentId: res.body.payment?.id }, orderBy: { startedAt: 'asc' } });
+      if (first?.gateway === 'mockpay-a') triedAFirst++;
     }
     const aState = (await tracker.health('mockpay-a', 'card')).state;
-    note(`${routed.length} card payments routed to: ${routed.join(', ')}; mockpay-a/card is now "${aState}"`);
-    record('Gateway failover', routed.every((g) => g === 'mockpay-b') && aState === 'degraded', `all traffic failed over to mockpay-b; mockpay-a card route ${aState}`);
+    note(`10 card payments, all routed to: ${[...new Set(routed)].join(', ')}`);
+    note(`mockpay-a was tried first ${triedAFirst} time(s), then avoided (its breaker trips after ${ctx.config.ROUTING_MIN_SAMPLES} failures; it is now "${aState}")`);
+    record(
+      'Gateway failover',
+      routed.every((g) => g === 'mockpay-b') && triedAFirst <= ctx.config.ROUTING_MIN_SAMPLES,
+      `every payment succeeded on mockpay-b; mockpay-a tried first only ${triedAFirst}x`,
+    );
     h.mocks['mockpay-a'].control.failureRate = 0;
 
     // 3b. NIBSS-style outage
@@ -146,18 +154,26 @@ async function main() {
     await tracker.reset(); // start from clean routing health (3b left the transfer routes degraded)
     h.mocks['mockpay-a'].control.bankOutages = ['058'];
     const gtb: number[] = [];
-    while (gtb.length < 15 && (await tracker.health('mockpay-a', 'bank_transfer', '058')).state !== 'degraded') {
-      gtb.push((await pay('bank_transfer', 500_000, '058')).status);
+    let gtbOnAFirst = 0;
+    for (let i = 0; i < 10; i++) {
+      const res = await pay('bank_transfer', 500_000, '058');
+      gtb.push(res.status);
+      const first = await ctx.prisma.paymentAttempt.findFirst({ where: { paymentId: res.body.payment?.id }, orderBy: { startedAt: 'asc' } });
+      if (first?.gateway === 'mockpay-a') gtbOnAFirst++;
     }
     const bankRoute = (await tracker.health('mockpay-a', 'bank_transfer', '058')).state;
     const gatewayRoute = (await tracker.health('mockpay-a', 'bank_transfer')).state;
-    const zenith = await pay('bank_transfer', 500_000, '057');
-    note(`${gtb.length} GTBank transfers: all ${gtb.every((s) => s === 201) ? 'succeeded (failed over)' : 'NOT all succeeded'}`);
-    note(`mockpay-a + GTBank route: "${bankRoute}"; mockpay-a + bank_transfer for everyone else: "${gatewayRoute}"; a Zenith transfer -> ${zenith.status}`);
+    const zenithCandidates = await ctx.router.candidates('bank_transfer', { bankCode: '057', amountKobo: 500_000 });
+    note(`10 GTBank transfers: ${gtb.every((s) => s === 201) ? 'all succeeded (failed over where needed)' : 'NOT all succeeded'}; tried mockpay-a first only ${gtbOnAFirst}x`);
+    note(`mockpay-a + GTBank route: "${bankRoute}"; mockpay-a + bank_transfer for everyone else: "${gatewayRoute}"`);
+    note(`Zenith (057) transfers can still use: ${zenithCandidates.join(', ')}`);
     record(
       'Bank-level health',
-      gtb.every((s) => s === 201) && bankRoute === 'degraded' && gatewayRoute === 'healthy' && zenith.status === 201,
-      'only the GTBank route on mockpay-a was cut off; the gateway stayed healthy for other banks',
+      gtb.every((s) => s === 201) &&
+        gtbOnAFirst <= ctx.config.ROUTING_MIN_SAMPLES &&
+        gatewayRoute === 'healthy' &&
+        zenithCandidates.includes('mockpay-a'),
+      'GTBank traffic moved off mockpay-a; mockpay-a stayed healthy for every other bank',
     );
     h.mocks['mockpay-a'].control.bankOutages = [];
 

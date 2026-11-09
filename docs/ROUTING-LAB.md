@@ -1,9 +1,77 @@
 # Routing Lab
 
+> **Question:** which routing strategy should a Nigerian payment orchestrator use, and does tracking health per *bank* (not just per gateway) actually help?
+>
+> **Answer (in simulation):** bank-level health clearly helps when one bank fails; for hard outages a circuit breaker beats pure Thompson sampling; on normal days Thompson-style ordering is cheaper. The **hybrid** (breaker decides which routes are alive, Thompson sampling orders the healthy ones) matched the best success rate in every scenario and had the lowest fees, so it is the production default. It reacts more slowly to *slow* degradation, which is the main trade-off.
+
+**Honesty first.** Everything below comes from a simulator with **illustrative, made-up parameters** (gateway success rates, fees, bank shares, outage shapes). It compares strategies under the *same* assumptions; it does not predict real-world numbers. No real gateway, bank or NIBSS data was used.
+
+Run it yourself:
+
+```powershell
+pnpm lab
+```
+
+That regenerates the tables below, `docs/routing-lab/results.json`, and the charts on the dashboard's **Routing Lab** page.
+
+## Why a lab
+
+Routing rules like "trip below 80% success over 5 calls, cool down for 30 seconds" are usually picked by gut feel. Here the rules are pure functions in `packages/routing` (`breaker.ts`, `thompson.ts`, `hybrid.ts`) that **both** the production API and the simulator call. So the lab measures exactly the code that ships; only the storage differs (Redis in production, memory in the lab).
+
+## The simulated world (`packages/routing/src/lab/model.ts`)
+
+| Assumption | Value (illustrative) |
+|---|---|
+| Gateways | gw-a (1.5% fee, cap NGN 2,000, card 97% / transfer 96%, ~350 ms), gw-b (1.4%, 96.5% / 95.5%, ~400 ms), gw-c (1.0%, cap NGN 1,500, 95% / 94%, ~450 ms) |
+| Banks | 6 banks with customer shares 22/20/18/15/15/10%; a bank-side failure rate of 0.5% on a normal day |
+| Traffic | Poisson arrivals, 2 payments/s for 120 minutes (~14,400 per run); 60% card; amounts log-normal around NGN 8,000 |
+| Failures | Each attempt draws "gateway works?" then "customer's bank works?". The failure carries its **scope** (gateway or bank), like a real error code would. Errors take 250 ms; timeouts waste 5 s |
+| Failover | Up to 3 gateways per payment, one after another |
+| Fail fast | If a strategy offers no gateway for a bank transfer, the customer is told "try card"; 50% of them do |
+
+**Strategies compared** (`strategies.ts`):
+
+| Id | What it does |
+|---|---|
+| `static` | Always the same gateway order. No learning; failover only. |
+| `breaker` | The original Phase 3 design: circuit breaker per (gateway, method); every failure counts against it. |
+| `breaker_bank` | Adds a breaker per (gateway, method, bank) and **attributes** failures to gateway or bank. |
+| `thompson_v1` | Discounted Thompson sampling (Beta posteriors, 60 s half-life), two factors (gateway x bank), borrows bank evidence from other gateways, skips routes whose draw is below 50%. Unbounded exploration. |
+| `thompson` | Same, with **bounded exploration**: a route the posterior thinks is dead gets at most one probe per 10 s. |
+| `thompson_cost` | Same, but maximises expected merchant revenue P(success) x (amount - fee). |
+| `hybrid` | `breaker_bank` decides which routes are alive and where probes go; `thompson_cost`-style draws order the healthy ones. |
+
+**Statistics.** Each scenario x strategy runs on 8 seeds. Each seed's traffic is shared by every strategy (common random numbers), so differences come from the strategies, not from luckier traffic. Values are means with 95% Student-t confidence intervals. "Adapt" = minutes until traffic to the failing route fell to 25% of its pre-incident level (60 s trailing window); "Recover" = minutes after the incident until it returned to 50%.
+
+## Findings
+
+1. **Bank-level health is worth it.** With GTBank failing on every gateway, the gateway-only breaker scored **94.10% ± 0.39** overall success vs **97.75% ± 0.15** for `breaker_bank`. The gateway-only breaker kept tripping whole gateways (for every bank's customers) because of one bank's failures. On the other scenarios the two are equal within the confidence intervals, so the extra tracking costs nothing.
+2. **In a hard rail outage, memory beats statistics.** NIBSS-style outage (transfers 95% timeouts everywhere): `breaker_bank` and `hybrid` ~91.8% overall success with p95 latency ~0.7 s; `thompson` 90.1% with p95 5 s; `static` 87.3% with p95 **15 s** (three timeouts in a row). The breaker's cooldown and consecutive-probe rules give it memory that a route is dead.
+3. **The lab caught a flaw in my first bandit design.** `thompson_v1` never adapted to the NIBSS outage (89.3%): once traffic stopped, old failures decayed, the belief drifted back to "gateways usually work", and payments flooded the dead rail again. Bounded exploration (`thompson`) improved it to 90.1% and adapted, but a pure bandit still lacks the breaker's memory. That motivated the hybrid. On normal days `thompson` and `thompson_v1` are identical, so the fix is free.
+4. **On a normal day, measured ordering is cheaper.** Every strategy reaches ~99.99% success thanks to failover, but fees differ: static 1.49%, breakers ~1.43%, Thompson variants and hybrid ~1.32% of volume, because they send more traffic to the cheaper gateway once they have evidence it is good enough. The price is ~25 ms more mean latency (gw-c is slower in this model).
+5. **The hybrid's trade-offs.** It matches the best success rate in every scenario (within the CIs) and has the lowest fees, but:
+   - it notices a **slow degradation** later (adapt 8.9 ± 3.0 min vs 1.5 ± 1.2 for `breaker_bank`), because the breaker only trips below 80% while Thompson keeps the slowly worsening route in the mix;
+   - it recovers more slowly after a full gateway outage (3.1 vs 1.0 min);
+   - its breakers change state a little more often on a normal day (18 vs 11), because more traffic goes to the lower-quality cheap gateway;
+   - it keeps re-checking a route that failed for one bank when that bank works on other gateways (it borrows that evidence), costing an occasional failed first attempt (the customer still succeeds through failover).
+6. **Static priority hides outages behind latency.** Its success rate is often fine (failover rescues payments) but customers wait for timeouts: p95 5.5 s in a gateway outage, 15 s in the NIBSS outage. Success rate alone would make it look acceptable.
+
+**Decision:** `ROUTING_STRATEGY=hybrid` is the production default (ADR-015). `breaker` remains the safer choice if slow degradations matter more than fees.
+
+**A bonus finding from the end-to-end demo:** switching the demo to the hybrid changed the gateway order and exposed a real double-charge bug in the payment path (an error in our own bookkeeping after a gateway had accepted a charge was treated as a gateway failure, so the payment failed over and was charged twice). It is fixed and covered by a regression test (ADR-016).
+
+## Limitations
+
+- Illustrative parameters; real gateways' failure patterns (correlated, bursty, partial) are richer than independent draws.
+- Payments are processed one at a time (no concurrency between payments).
+- Failure **scope** is assumed to be reported correctly by every gateway; in reality attribution may be wrong or missing (then everything counts as gateway-level, like `breaker`).
+- The customer's chance of switching to card (50%) is a guess and drives part of the fail-fast benefit.
+- One setting per strategy was tested, with no hyper-parameter search (deliberately, to avoid tuning the strategies to the scenarios).
+
 ## Results
 
 <!-- RESULTS:START -->
-_Generated 2026-11-09 02:33 UTC by `pnpm lab`: 8 seeds per cell, 2 payments/s for 120 simulated minutes (~14,400 payments per run). Values are mean ± 95% confidence interval across seeds._
+_Generated 2026-11-09 03:07 UTC by `pnpm lab`: 8 seeds per cell, 2 payments/s for 120 simulated minutes (~14,400 payments per run). Values are mean ± 95% confidence interval across seeds._
 
 ### Normal day (`baseline`)
 

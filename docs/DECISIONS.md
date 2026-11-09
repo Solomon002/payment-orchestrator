@@ -78,3 +78,18 @@ Short ADR-style notes: the context, the decision, and what it costs.
 
 **Decision:** Tests use `payments_test` and Redis DB 1; `pnpm demo` creates and uses `payments_demo` and Redis DB 2.
 **Why:** `pnpm test` and `pnpm demo` must never wipe development data, and must work while `pnpm dev` is running.
+
+## ADR-015: Hybrid routing (breaker gate + Thompson ordering), chosen by simulation
+
+**Context:** The Phase 3 circuit breaker used hand-picked thresholds and ignored banks. Nigerian failures are often bank-specific, and gateways differ in fees.
+**Options:** keep the breaker; add bank-level breakers; replace it with Thompson sampling (a Bayesian multi-armed bandit); combine them.
+**Decision:** Evaluate all of them in a reproducible simulator (`packages/routing/src/lab`, `pnpm lab`, 7 strategies x 7 scenarios x 8 seeds, 95% CIs) that calls the same pure routing functions as production. Ship `hybrid` as the default: bank-aware breakers decide which routes are alive; Thompson sampling (objective: P(success) x (amount - fee)) orders the healthy ones. `breaker`, `thompson` and `thompson_cost` remain selectable via `ROUTING_STRATEGY`.
+**Why:** see docs/ROUTING-LAB.md. Bank attribution: 94.1% -> 97.8% success when one bank fails everywhere. Breaker memory: best in hard outages (p95 0.7 s vs 5 s for pure Thompson). Thompson ordering: fees 1.43% -> 1.32% of volume on normal days. The hybrid matched the best success rate everywhere.
+**Consequences:** Slower to react to slow degradations (~9 min vs ~1.5) and to recover after full outages; slightly more breaker state changes; occasional exploratory attempts on a route that failed for one bank. All results are from illustrative parameters, not real gateway data.
+
+## ADR-016: Only the gateway call can trigger failover
+
+**Context:** The end-to-end demo found a double charge: a slow database transaction right after a gateway had accepted a charge threw inside the same `try` as the gateway call, so it was treated as a gateway failure and the payment was sent to a second gateway.
+**Decision:** The `try` around a gateway attempt covers only `adapter.initialize`. Once a gateway accepts, the payment is committed to it: routing-health bookkeeping is best-effort (errors logged, never thrown), and the "created -> pending" transaction retries transient errors with a longer wait.
+**Root cause of the slow transaction:** Prisma waits only 2 s by default to START an interactive transaction; on a cold connection pool (a fresh process talking to Postgres in Docker on Windows) opening connections sometimes took longer. The client now connects eagerly and uses `transactionOptions: { maxWait: 10s, timeout: 15s }`; the same error had also caused rare test flakes.
+**Consequences:** A regression test simulates a bookkeeping failure after acceptance and asserts that exactly one gateway was tried and charged. If the database stays down, the request fails with a 500 and the payment stays `created` (the poller fails it after 5 minutes and the charge surfaces in reconciliation), which is better than charging twice.

@@ -3,7 +3,7 @@
 // The browser never talks to the mock gateways directly; the API forwards
 // requests using the control key, which never leaves the server.
 // Not mounted in production (there are no mock gateways there).
-import { bankCodeSchema, mockControlPatchSchema, paymentMethodSchema } from '@po/shared';
+import { bankCodeSchema, mockControlPatchSchema, NG_BANKS, paymentMethodSchema } from '@po/shared';
 import { Router } from 'express';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -19,9 +19,12 @@ const firePaymentsSchema = z
     count: z.number().int().min(1).max(50),
     method: paymentMethodSchema,
     amountKobo: z.number().int().min(100).max(100_000_000).default(500_000),
-    bankCode: bankCodeSchema.optional(),
+    // A specific bank, 'mixed' (a random demo bank per payment), or omitted (no bank).
+    bankCode: z.union([bankCodeSchema, z.literal('mixed')]).optional(),
   })
   .strict();
+
+const DEMO_BANKS = Object.keys(NG_BANKS).slice(0, 6);
 
 export function simulatorRoutes(ctx: AppContext): Router {
   const router = Router();
@@ -94,7 +97,7 @@ export function simulatorRoutes(ctx: AppContext): Router {
           method: input.method,
           reference: `sim-${randomUUID().slice(0, 13)}`,
           customerEmail: 'customer@example.com',
-          bankCode: input.bankCode,
+          bankCode: input.bankCode === 'mixed' ? DEMO_BANKS[Math.floor(Math.random() * DEMO_BANKS.length)] : input.bankCode,
         });
         results.push({ status: r.payment.status, gateway: r.payment.gateway });
       } catch (err) {

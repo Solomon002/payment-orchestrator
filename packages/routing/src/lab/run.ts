@@ -29,6 +29,8 @@ export interface ScenarioResult {
   id: string;
   title: string;
   description: string;
+  /** Incident windows in simulated minutes (for chart shading). */
+  incidents: { label: string; startMin: number; endMin: number }[];
   strategies: StrategyResult[];
 }
 
@@ -108,6 +110,7 @@ export function runLab(opts: { seeds?: number; traffic?: TrafficSpec; scenarios?
       id: scenario.id,
       title: scenario.title,
       description: scenario.description,
+      incidents: scenario.incidents.map((i) => ({ label: i.label, startMin: i.startMs / 60_000, endMin: i.endMs / 60_000 })),
       strategies: STRATEGY_IDS.map((id) => {
         const acc = perStrategy.get(id)!;
         return {

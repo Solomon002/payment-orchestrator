@@ -150,3 +150,19 @@ Note that the naive run did not break the ledger's zero-sum rule: every entry ba
 **Key idea:** Writing down the known limitations honestly is a design review in disguise.
 
 **Interview question:** *"What happens if a gateway times out but actually charged the customer?"* We fail over and may charge twice. Reconciliation catches it, because the same reference settles on two gateways, and a human refunds. A stronger design would verify with the first gateway before failing over, or use the same reference on both gateways so the gateway dedupes it.
+
+---
+
+## Phase 7: Bank-level health and the routing lab
+
+**What we built:** Route health per **(gateway, method, bank)** with failures attributed to the gateway or the bank; a shared `@po/routing` package of pure routing rules (circuit breaker, Thompson sampling, hybrid); a simulator that replays 7 Nigerian-style outage scenarios against 7 strategies with confidence intervals (`pnpm lab`); a dashboard Routing Lab page; and `hybrid` as the production default.
+
+**Key idea 1, attribution (analogy):** When a delivery fails, you need to know whether the courier or the recipient's address was the problem. Blaming the courier for one bad address would stop all deliveries. Our gateways' error codes say "bank unavailable" vs "gateway error", so one bank's outage only cuts off that bank's route.
+
+**Key idea 2, Thompson sampling (analogy):** Slot machines with unknown payout rates. Keep a belief (a Beta distribution) about each machine, draw one random guess from each belief, and play the best guess. Uncertain machines sometimes win the draw (exploration); clearly good ones usually do (exploitation).
+
+**Key idea 3, measure, don't guess:** The lab ran every strategy on identical simulated traffic (common random numbers) over 8 seeds and reported 95% confidence intervals. It overturned my first bandit design: with decaying evidence and no traffic, a dead route's belief drifts back to "probably fine" and payments flood it again. Bounded exploration helped; the breaker's memory (cooldown + consecutive probes) helped more. So the final design is a hybrid.
+
+**Bugs it prevents:** One bank's outage blocking every bank's customers; routing that floods a dead rail; paying higher fees than necessary on normal days. Bonus: the demo exposed a double-charge bug in the payment path (bookkeeping errors after a successful charge caused failover). Now fixed, with a regression test.
+
+**Interview question:** *"Why not just use a multi-armed bandit for routing?"* A plain bandit optimises the average and forgets: during a long outage nothing is learned, old failures decay, and it starts sending traffic back too early. Payments need hysteresis for dead routes (a circuit breaker) plus smart ordering among healthy ones (the bandit). I showed this with a simulator rather than asserting it.

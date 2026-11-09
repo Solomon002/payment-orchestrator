@@ -32,7 +32,15 @@ export interface ContextOptions {
 export function createContext(options: ContextOptions = {}): AppContext {
   const config = options.config ?? env();
   const log = options.log ?? logger();
-  const prisma = new PrismaClient({ datasources: { db: { url: config.DATABASE_URL } } });
+  const prisma = new PrismaClient({
+    datasources: { db: { url: config.DATABASE_URL } },
+    // Prisma's default is 2s to START an interactive transaction. On a cold
+    // connection pool (fresh process, Docker on Windows) opening connections can
+    // take longer than that, and the transaction failed before doing anything.
+    transactionOptions: { maxWait: 10_000, timeout: 15_000 },
+  });
+  // Open the pool now rather than on the first payment.
+  prisma.$connect().catch((err: unknown) => log.error({ err }, 'initial database connection failed'));
   const redis = new Redis(config.REDIS_URL, { maxRetriesPerRequest: 3 });
   redis.on('error', (err) => log.error({ err: err.message }, 'redis error'));
   const gateways = options.gateways ?? registryFromEnv(config);

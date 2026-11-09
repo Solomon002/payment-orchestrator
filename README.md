@@ -2,7 +2,9 @@
 
 A payment layer that sits between a merchant and several payment gateways. It routes each payment to the healthiest gateway **and payment method**, records every movement of money in a double-entry ledger, processes gateway webhooks safely, and reconciles its books against gateway settlement reports.
 
-> **What this is:** a portfolio project that demonstrates backend engineering patterns used in payment systems: idempotency, row-level locking, a double-entry ledger, safe webhook handling, circuit-breaker failover and reconciliation.
+> **What this is:** a portfolio project that demonstrates backend engineering patterns used in payment systems: idempotency, row-level locking, a double-entry ledger, safe webhook handling, circuit-breaker failover and reconciliation. It also includes a **routing lab**: a simulator that compares seven routing strategies (circuit breakers, Thompson-sampling bandits, a hybrid) across seven Nigerian-style outage scenarios with confidence intervals, and picks the production strategy from the results ([docs/ROUTING-LAB.md](docs/ROUTING-LAB.md)).
+>
+> Similar products exist (commercial orchestrators, and open-source ones such as Juspay's Hyperswitch). This is a learning build of the hard parts, not a new idea.
 >
 > **What this is not:** a validated product or a claim about a market gap. It runs in **test mode only**: two mock gateways that I control, plus an optional Paystack adapter that accepts **test keys only** and has not been exercised against Paystack (no keys were available). No real money moves.
 
@@ -10,7 +12,7 @@ A payment layer that sits between a merchant and several payment gateways. It ro
 
 Two facts shape the design:
 
-- **NIBSS outages are real** and hit bank transfers on every gateway at the same time, while cards keep working. So health and failover are tracked **per gateway *and* per payment method**, not per gateway.
+- **NIBSS outages are real** and hit bank transfers on every gateway at the same time, while cards keep working. So health and failover are tracked **per gateway *and* per payment method**, not per gateway. Failures are also tracked **per customer bank**, with each failure attributed to the gateway or the bank, so one bank's bad day doesn't cut off a gateway for everyone else.
 - **Webhooks can be resent with identical payloads, and delivery is not guaranteed.** So webhook handling is idempotent, there is a polling fallback using the gateway's verify API, and a reconciliation job independently checks the books.
 
 ## Architecture
@@ -70,7 +72,12 @@ pnpm demo:concurrency
 ```
 50 simultaneous withdrawals against a balance that covers 10, comparing the naive and the safe endpoint.
 
-**In the dashboard:** open **Simulator** and click **mockpay-a down**, then **Send 10 payments**. Watch the mockpay-a card route turn *degraded* and traffic move to mockpay-b. Try **NIBSS outage** with method *bank transfer*, then *card*. Open **Reconciliation** and press **Import settlements & run now**.
+```powershell
+pnpm lab
+```
+Runs the routing lab (about 2 minutes): 7 strategies x 7 outage scenarios x 8 seeds. Writes [docs/ROUTING-LAB.md](docs/ROUTING-LAB.md) and the data behind the dashboard's **Routing Lab** page.
+
+**In the dashboard:** open **Routing Lab** to see the strategy comparison charts. Then open **Simulator** and click **mockpay-a down**, then **Send 10 payments**. Watch the mockpay-a card route turn *degraded* and traffic move to mockpay-b. Try **NIBSS outage** with method *bank transfer*, then *card*. Try **GTBank down on mockpay-a** and send bank transfers from GTBank: only that bank's route is cut off (see the bank-level table on **Gateway Health**). Open **Reconciliation** and press **Import settlements & run now**.
 
 ### Tests
 
@@ -90,8 +97,9 @@ pnpm typecheck
 
 | Check | Result |
 |---|---|
-| `pnpm test` | 63 tests passing (shared 6, dashboard 4, mock gateway 5, API 48) |
-| `pnpm demo` | 7/7 scenarios pass |
+| `pnpm test` | 90 tests passing (shared 6, dashboard 4, mock gateway 6, routing + lab 17, API 57) |
+| `pnpm demo` | 8/8 scenarios pass (including bank-level health) |
+| `pnpm lab` | bank-aware breaker 97.75% vs gateway-only 94.10% success when one bank fails everywhere; hybrid matches the best success rate in every scenario with the lowest fees (simulation, illustrative parameters) |
 | `pnpm demo:concurrency` | naive: 31 of 50 withdrawals succeeded, balance **−NGN 21,000**; safe: exactly 10, balance NGN 0; one key reused 50 times: 1 withdrawal |
 | Dashboard | every page checked in a browser; live failover visible on the Simulator page |
 
@@ -101,7 +109,7 @@ The naive run varies with machine timing; the safe run is deterministic.
 
 | Endpoint | Auth | Notes |
 |---|---|---|
-| `POST /v1/payments` | merchant key + `Idempotency-Key` | 201 pending · 402 every gateway failed · 503 method unavailable everywhere (suggests an alternative) |
+| `POST /v1/payments` | merchant key + `Idempotency-Key` | optional `bankCode` enables bank-level routing. 201 pending · 402 every gateway failed · 503 method (or bank) unavailable everywhere, suggesting an alternative |
 | `GET /v1/payments/:id` | merchant key | scoped to the calling merchant |
 | `POST /v1/withdrawals` | merchant key + `Idempotency-Key` | locked, safe |
 | `POST /v1/withdrawals/naive` | merchant key | **deliberately unsafe** teaching endpoint, refused in production |
@@ -122,6 +130,10 @@ The naive run varies with machine timing; the safe run is deterministic.
 
 ### Known limitations (honest list)
 
+- **Routing-lab numbers come from a simulator with illustrative parameters**, not real gateway, bank or NIBSS data. They compare strategies under the same assumptions; they don't predict real success rates.
+- **A payment's `bankCode` is used for routing but not yet stored on the payment record** (adding the column is a small migration).
+- **The hybrid router reacts more slowly to slow degradations** than the plain breaker (about 9 vs 1.5 simulated minutes). Set `ROUTING_STRATEGY=breaker` if that matters more than fees.
+
 - **Admin auth is one shared key** held in the browser's session storage. A real system needs per-user accounts, roles, SSO and an audit log.
 - **Rate limits are in-memory per process.** Several API instances would need a Redis-backed store.
 - **Health tracking does read-then-write in Redis** without a Lua script, so two simultaneous results can race. In the worst case a route trips one call late; money is never affected.
@@ -134,4 +146,6 @@ The naive run varies with machine timing; the safe run is deterministic.
 
 ## Tech stack
 
-TypeScript (strict) · Node · Express 5 · PostgreSQL 16 · Prisma 6 (+ raw SQL for locking and ledger reads) · Redis 7 · BullMQ · Zod · pino · Vitest + supertest · autocannon · React 19 + Vite + Tailwind 4 + TanStack Query · GitHub Actions · pnpm workspaces.
+TypeScript (strict) · Node · Express 5 · PostgreSQL 16 · Prisma 6 (+ raw SQL for locking and ledger reads) · Redis 7 · BullMQ · Zod · pino · Vitest + supertest · autocannon · React 19 + Vite + Tailwind 4 + TanStack Query · hand-built SVG charts · GitHub Actions · pnpm workspaces.
+
+Routing maths: circuit breakers, discounted Thompson sampling with Beta posteriors (Marsaglia-Tsang Gamma sampler), hierarchical gateway x bank model, seeded simulation with common random numbers and Student-t confidence intervals.

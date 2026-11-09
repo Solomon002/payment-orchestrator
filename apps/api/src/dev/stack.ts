@@ -28,6 +28,8 @@ export async function startHarness(opts: {
   log: Logger;
   router?: 'static' | 'health';
   workers?: boolean;
+  /** Random source for Thompson draws (tests pass a seeded one for reproducibility). */
+  random?: () => number;
   mockLog?: (msg: string) => void;
 }): Promise<Harness> {
   // Bind the API port first so the mocks know where to send webhooks.
@@ -69,7 +71,7 @@ export async function startHarness(opts: {
     log: opts.log,
     gateways: new GatewayRegistry(adapters),
     router: (base) =>
-      opts.router === 'health' ? new HealthAwareRouter(base.gateways, base.redis, base.config) : new StaticRouter(base.gateways),
+      opts.router === 'health' ? new HealthAwareRouter(base.gateways, base.redis, base.config, opts.random) : new StaticRouter(base.gateways),
   });
   apiServer.on('request', createApp(ctx));
   const workers = opts.workers === false ? undefined : startWorkers(ctx);

@@ -88,7 +88,14 @@ stateDiagram-v2
   probing --> degraded: any failure
 ```
 
-Candidate order: healthy routes by success rate, then latency (unranked until they have `MIN_SAMPLES`), with probing routes last. Every 5th payment puts a probing route first. Degraded routes are excluded. If nothing is left for a method, the API answers 503 `METHOD_UNAVAILABLE` and lists the methods that still have a route.
+Health is tracked at two levels: (gateway, method) and (gateway, method, **bank**). A success counts for both; a failure counts only for the level its error code blames (`bank_unavailable` means bank, anything else means gateway). A route's state is the worst of its levels.
+
+Strategies (`ROUTING_STRATEGY`, rules in `packages/routing`):
+- **hybrid** (default): degraded routes excluded and probing placed by the breaker rules; healthy routes ordered by a Thompson draw of P(success) x (amount - fee).
+- **breaker**: healthy routes by success rate, then latency (unranked until `MIN_SAMPLES`), probing last, every 5th payment probing first.
+- **thompson / thompson_cost**: Thompson sampling over decaying counts, with probes for suspect routes limited by an atomic Redis `SET NX PX` lock.
+
+If nothing is left for a method (and bank), the API answers 503 `METHOD_UNAVAILABLE` and lists the methods that still have a route. The choice of default is justified by simulation in [ROUTING-LAB.md](ROUTING-LAB.md).
 
 Gateway errors are classified (`gateway.types.ts`): timeouts and 5xx count against health and trigger failover; 4xx ("rejected") does neither, because another gateway would refuse the same bad request.
 

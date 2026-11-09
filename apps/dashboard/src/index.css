@@ -16,3 +16,37 @@ body {
 .tabular {
   font-variant-numeric: tabular-nums;
 }
+
+/* Chart tokens. Categorical slots validated with the dataviz palette validator
+   (light vs #fcfcfb, dark vs #0f172a): all hard checks pass; three light slots
+   are below 3:1 contrast, so every chart ships a table view. */
+.viz-root {
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #6250d6;
+  --viz-muted: #6b7280;
+  --viz-grid: #e5e7eb;
+  --viz-axis: #cbd5e1;
+  --viz-band: rgba(100, 116, 139, 0.1);
+  --viz-dim: #cbd5e1;
+}
+@media (prefers-color-scheme: dark) {
+  .viz-root {
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --viz-muted: #94a3b8;
+    --viz-grid: #1e293b;
+    --viz-axis: #334155;
+    --viz-band: rgba(148, 163, 184, 0.1);
+    --viz-dim: #475569;
+  }
+}

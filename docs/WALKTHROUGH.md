@@ -61,7 +61,16 @@ Read `modules/withdrawals/withdrawal.service.ts`: `withdrawNaive` (check-then-ac
 
 - **Circuit breaker:** like a fuse. After too many failures it "trips" and stops sending traffic, waits (**cooldown**), then lets a few test requests through (**half-open / probing**) before fully trusting the route again.
 
-Read `router.types.ts` (the interface), `static.router.ts` (the simplest version), then `health.tracker.ts` (the breaker per gateway + method, stored in Redis) and `health.router.ts` (how candidates are ordered). `routing.routes.ts` exposes the state to the dashboard.
+Read `router.types.ts` (the interface), `static.router.ts` (the simplest version), then `health.tracker.ts` (health per gateway + method AND per gateway + method + bank, stored in Redis) and `health.router.ts` (the four strategies: hybrid, breaker, thompson, thompson_cost). `routing.routes.ts` exposes the state to the dashboard.
+
+**The routing rules themselves live in `packages/routing`**, as pure functions shared with the simulator:
+
+- **Thompson sampling:** a way to choose between options with unknown success rates. Keep a belief about each (a **Beta distribution**: a probability distribution over a probability), draw one random guess from each, and pick the best guess. Uncertain options sometimes win the draw, so they keep being tested (exploration).
+- `random.ts`: a seeded random generator (so simulations are reproducible) and Beta/Gamma sampling.
+- `breaker.ts`: the circuit-breaker state machine and candidate ordering.
+- `thompson.ts`: decaying evidence, the gateway x bank model, and bounded exploration.
+- `hybrid.ts`: the breaker decides which routes are alive; Thompson orders the healthy ones.
+- `lab/`: the simulator: `model.ts` (the simulated world, all assumptions in one place), `scenarios.ts`, `strategies.ts`, `simulate.ts` (one run plus metrics), `run.ts` (seeds plus confidence intervals) and `cli.ts` (`pnpm lab`). Then read [ROUTING-LAB.md](ROUTING-LAB.md).
 
 ## 6. Reconciliation (`modules/reconciliation`)
 

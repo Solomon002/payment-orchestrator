@@ -83,6 +83,7 @@ export interface Overview {
 export interface RouteHealth {
   gateway: string;
   method: PaymentMethod;
+  bankCode: string | null;
   state: RouteState;
   samples: number;
   successRate: number | null;
@@ -91,12 +92,17 @@ export interface RouteHealth {
   probeSuccesses: number;
   lastChange: string | null;
   reason: string | null;
+  /** Thompson posterior-mean success probability. */
+  expectedSuccess: number;
+  decayed: { successes: number; failures: number };
 }
 
 export interface RoutingHealth {
   mode: string;
+  strategy?: 'hybrid' | 'breaker' | 'thompson' | 'thompson_cost';
   thresholds?: { windowSize: number; minSamples: number; minSuccessRate: number; cooldownMs: number; probeSuccesses: number };
   routes: RouteHealth[];
+  bankRoutes?: RouteHealth[];
 }
 
 export interface WebhookEvent {

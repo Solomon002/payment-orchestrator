@@ -8,6 +8,7 @@ import { OverviewPage } from './pages/Overview';
 import { PaymentDetailPage } from './pages/PaymentDetail';
 import { PaymentsPage } from './pages/Payments';
 import { ReconciliationPage } from './pages/Reconciliation';
+import { RoutingLabPage } from './pages/RoutingLab';
 import { SimulatorPage } from './pages/Simulator';
 import { WebhooksPage } from './pages/Webhooks';
 
@@ -15,6 +16,7 @@ const NAV = [
   { to: '/', label: 'Overview' },
   { to: '/payments', label: 'Payments' },
   { to: '/health', label: 'Gateway Health' },
+  { to: '/lab', label: 'Routing Lab' },
   { to: '/webhooks', label: 'Webhooks' },
   { to: '/reconciliation', label: 'Reconciliation' },
   { to: '/simulator', label: 'Simulator' },
@@ -142,6 +144,7 @@ export function App() {
           <Route path="/payments" element={<PaymentsPage />} />
           <Route path="/payments/:id" element={<PaymentDetailPage />} />
           <Route path="/health" element={<GatewayHealthPage />} />
+          <Route path="/lab" element={<RoutingLabPage />} />
           <Route path="/webhooks" element={<WebhooksPage />} />
           <Route path="/reconciliation" element={<ReconciliationPage />} />
           <Route path="/simulator" element={<SimulatorPage />} />
