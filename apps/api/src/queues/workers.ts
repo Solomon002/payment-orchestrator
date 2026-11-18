@@ -75,7 +75,15 @@ export async function scheduleRecurringJobs(ctx: AppContext) {
   );
   // Public demo: wipe and reseed the shared sandbox on a fixed interval.
   if (ctx.config.PUBLIC_DEMO) {
-    await initDemoSchedule(ctx);
+    // Start every boot from a clean sandbox. On free hosts the server sleeps when
+    // idle; on wake the mock gateways' in-memory charges are gone, so old data in
+    // the database would no longer match them (reconciliation would flag it).
+    try {
+      await resetDemo(ctx);
+    } catch (err) {
+      ctx.log.error({ err }, 'demo reset on startup failed; will retry on the next scheduled reset');
+      await initDemoSchedule(ctx);
+    }
     await ctx.queues.maintenance.upsertJobScheduler(
       'demo-reset',
       { every: ctx.config.DEMO_RESET_INTERVAL_MS },

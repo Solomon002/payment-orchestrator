@@ -37,7 +37,13 @@ function Login() {
   const [value, setValue] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const { data: demo } = useQuery({ queryKey: ['demo-info'], queryFn: getDemoInfo });
+  const { data: demo, isLoading: connecting } = useQuery({ queryKey: ['demo-info'], queryFn: getDemoInfo });
+  // On free hosting the server sleeps when idle; the first request can take a while.
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setSlow(true), 2_000);
+    return () => clearTimeout(t);
+  }, []);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -85,6 +91,11 @@ function Login() {
           </p>
         </div>
 
+        {connecting && slow && (
+          <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+            Waking up the server… It runs on a free tier that sleeps when idle, so the first visit can take up to a minute.
+          </div>
+        )}
         {demo?.enabled ? (
           <>
             <Button onClick={tryDemo} disabled={busy} className="w-full py-2.5 text-base">

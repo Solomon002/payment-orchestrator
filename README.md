@@ -95,7 +95,7 @@ pnpm typecheck
 
 ## Deploying
 
-Dashboard on Vercel, backend (API + worker + mock gateways in one container) on Railway: step-by-step in [DEPLOY.md](DEPLOY.md).
+Free hosting: dashboard on Vercel, backend (API + worker + mock gateways in one ~100 MB process) on Render, Postgres on Neon, Redis on Render Key Value. Step-by-step in [DEPLOY.md](DEPLOY.md).
 
 ## Public demo mode
 
