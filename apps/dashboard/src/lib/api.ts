@@ -5,6 +5,13 @@ import type { MockControl, PaymentMethod, RouteState } from '@po/shared';
 
 const STORAGE_KEY = 'po-admin-key';
 
+/**
+ * Where the API lives. Locally the Vite dev server proxies /api to it. In
+ * production (dashboard on Vercel, API on Railway) set VITE_API_URL at build
+ * time to the API's public URL; the API allows this origin via CORS.
+ */
+export const API_BASE = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') || '/api';
+
 export function getAdminKey(): string | null {
   try {
     return sessionStorage.getItem(STORAGE_KEY);
@@ -40,7 +47,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (key) headers.set('x-admin-key', key);
   if (init.body && !headers.has('content-type')) headers.set('content-type', 'application/json');
 
-  const res = await fetch(`/api${path}`, { ...init, headers });
+  const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
   const body = await res.json().catch(() => null);
   if (res.status === 401) setAdminKey(null);
   if (!res.ok) {
@@ -183,14 +190,14 @@ export interface Me {
 
 /** Unauthenticated: is the public demo on? */
 export async function getDemoInfo(): Promise<DemoInfo> {
-  const res = await fetch('/api/demo/info');
+  const res = await fetch(`${API_BASE}/demo/info`);
   if (!res.ok) return { enabled: false };
   return (await res.json()) as DemoInfo;
 }
 
 /** Starts a temporary demo session and signs in with it. */
 export async function startDemoSession(): Promise<void> {
-  const res = await fetch('/api/demo/session', { method: 'POST' });
+  const res = await fetch(`${API_BASE}/demo/session`, { method: 'POST' });
   const body = await res.json().catch(() => null);
   if (!res.ok) throw new ApiError(res.status, body?.error?.code ?? 'HTTP_ERROR', body?.error?.message ?? 'Could not start the demo');
   setAdminKey(body.token as string);

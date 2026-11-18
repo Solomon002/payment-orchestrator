@@ -28,8 +28,9 @@ const envSchema = z
     DASHBOARD_ORIGIN: z.string().url().default('http://localhost:5173'),
     ADMIN_API_KEY: secret('ADMIN_API_KEY'),
 
-    DATABASE_URL: z.string().startsWith('postgresql://'),
-    REDIS_URL: z.string().startsWith('redis://'),
+    // Hosts write these differently (postgres:// vs postgresql://, rediss:// for TLS); all are fine.
+    DATABASE_URL: z.string().regex(/^postgres(ql)?:\/\//, 'DATABASE_URL must be a postgres:// or postgresql:// URL'),
+    REDIS_URL: z.string().regex(/^rediss?:\/\//, 'REDIS_URL must be a redis:// or rediss:// URL'),
 
     DEMO_MERCHANT_API_KEY: z.string().startsWith('sk_test_').min(32),
 

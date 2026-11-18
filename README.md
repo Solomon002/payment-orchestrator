@@ -93,6 +93,10 @@ pnpm lint
 pnpm typecheck
 ```
 
+## Deploying
+
+Dashboard on Vercel, backend (API + worker + mock gateways in one container) on Railway: step-by-step in [DEPLOY.md](DEPLOY.md).
+
 ## Public demo mode
 
 Set `PUBLIC_DEMO=true` (with `ENABLE_NAIVE_ENDPOINTS=false`) to turn the dashboard into a shared, self-resetting sandbox that anyone can try without a key:

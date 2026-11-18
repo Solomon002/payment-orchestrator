@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { DataList } from '../components/DataList';
 import { Badge, Button, Card, ErrorNote, inputClass, Mono } from '../components/ui';
-import { api, getAdminKey, post, type Discrepancy, type ReconRun } from '../lib/api';
+import { api, API_BASE, getAdminKey, post, type Discrepancy, type ReconRun } from '../lib/api';
 import { dateTime, naira, shortRef } from '../lib/format';
 import { useMe } from '../lib/useMe';
 
@@ -46,7 +46,7 @@ export function ReconciliationPage() {
   });
   const upload = useMutation({
     mutationFn: async () => {
-      const res = await fetch('/api/admin/reconciliation/settlements/upload', {
+      const res = await fetch(`${API_BASE}/admin/reconciliation/settlements/upload`, {
         method: 'POST',
         headers: { 'content-type': 'text/csv', 'x-admin-key': getAdminKey() ?? '' },
         body: csv,

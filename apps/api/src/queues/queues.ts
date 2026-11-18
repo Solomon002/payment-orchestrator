@@ -28,7 +28,7 @@ export const WEBHOOK_JOB_OPTIONS: JobsOptions = {
 
 /** BullMQ requires maxRetriesPerRequest: null on its connections (blocking commands). */
 export function bullConnection(redisUrl: string): Redis {
-  return new Redis(redisUrl, { maxRetriesPerRequest: null });
+  return new Redis(redisUrl, { maxRetriesPerRequest: null, family: 0 });
 }
 
 export interface Queues {

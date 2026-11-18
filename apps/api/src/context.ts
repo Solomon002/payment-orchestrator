@@ -41,7 +41,8 @@ export function createContext(options: ContextOptions = {}): AppContext {
   });
   // Open the pool now rather than on the first payment.
   prisma.$connect().catch((err: unknown) => log.error({ err }, 'initial database connection failed'));
-  const redis = new Redis(config.REDIS_URL, { maxRetriesPerRequest: 3 });
+  // family: 0 lets ioredis use IPv4 or IPv6 (Railway's private network is IPv6-only).
+  const redis = new Redis(config.REDIS_URL, { maxRetriesPerRequest: 3, family: 0 });
   redis.on('error', (err) => log.error({ err: err.message }, 'redis error'));
   const gateways = options.gateways ?? registryFromEnv(config);
   const queues = createQueues(config.REDIS_URL);
