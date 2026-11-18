@@ -347,6 +347,17 @@ export function createMockGateway(opts: MockGatewayOptions) {
     res.json({ control });
   });
 
+  // Forget every charge and delivery (used by the public demo's hourly reset, so
+  // old charges don't reappear in settlement reports after the database is wiped).
+  app.post('/control/clear', requireControlKey, (_req, res) => {
+    charges.clear();
+    deliveries.length = 0;
+    settlementOverrides.clear();
+    omittedSettlements.clear();
+    phantomSettlements.length = 0;
+    res.json({ ok: true });
+  });
+
   const tamperSchema = z.object({ reference: z.string().min(1), amountKobo: z.number().int().nonnegative() });
   app.post('/control/settlements/tamper', requireControlKey, (req, res) => {
     const input = tamperSchema.parse(req.body);

@@ -5,7 +5,9 @@ import { randomUUID } from 'node:crypto';
 import { pinoHttp } from 'pino-http';
 import type { AppContext } from './context';
 import { bigintReplacer } from './lib/money';
-import { adminAuth, merchantAuth } from './middleware/auth';
+import { adminAuth, merchantAuth, roleOf } from './middleware/auth';
+import { demoRoutes } from './modules/demo/demo.routes';
+import { demoPolicy, demoSessionOf, nextResetAt } from './modules/demo/demo.service';
 import { adminRoutes } from './modules/admin/admin.routes';
 import { simulatorRoutes } from './modules/admin/simulator.routes';
 import { reconciliationRoutes } from './modules/reconciliation/reconciliation.routes';
@@ -20,6 +22,8 @@ export function createApp(ctx: AppContext): Express {
   const app = express();
 
   app.disable('x-powered-by');
+  // Behind a hosting proxy, trust its X-Forwarded-For so rate limits see the real client IP.
+  if (ctx.config.TRUST_PROXY > 0) app.set('trust proxy', ctx.config.TRUST_PROXY);
   // JSON has no BigInt; convert kobo amounts to numbers (safely) on the way out.
   app.set('json replacer', bigintReplacer);
 
@@ -58,13 +62,26 @@ export function createApp(ctx: AppContext): Express {
   v1.use(withdrawalRoutes(ctx));
   app.use('/v1', v1);
 
-  // ---- Admin API for the dashboard (X-Admin-Key) ----
+  // ---- Public demo (no auth): demo info and demo sessions ----
+  app.use('/demo', demoRoutes(ctx));
+
+  // ---- Admin API for the dashboard (X-Admin-Key: owner key or demo session) ----
   const admin = express.Router();
   admin.use(adminAuth(ctx));
+  admin.use(demoPolicy(ctx)); // demo sessions: read anything, change only allow-listed things
+  admin.get('/me', async (_req, res) => {
+    const session = demoSessionOf(res);
+    res.json({
+      role: roleOf(res),
+      expiresAt: session?.expiresAt ?? null,
+      nextResetAt: ctx.config.PUBLIC_DEMO ? await nextResetAt(ctx) : null,
+    });
+  });
   admin.use(routingRoutes(ctx));
   admin.use(reconciliationRoutes(ctx));
   admin.use(adminRoutes(ctx));
-  if (ctx.config.NODE_ENV !== 'production') admin.use(simulatorRoutes(ctx));
+  // The simulator drives the mock gateways: available in development and in the public demo.
+  if (ctx.config.NODE_ENV !== 'production' || ctx.config.PUBLIC_DEMO) admin.use(simulatorRoutes(ctx));
   app.use('/admin', admin);
 
   app.get('/health', async (_req, res) => {

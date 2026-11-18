@@ -80,6 +80,20 @@ const envSchema = z
 
     ENABLE_NAIVE_ENDPOINTS: bool,
     RACE_WINDOW_MS: z.coerce.number().int().min(0).max(5_000).default(50),
+
+    // ---- Public demo mode (a shared, self-resetting sandbox for visitors) ----
+    PUBLIC_DEMO: bool,
+    DEMO_SESSION_TTL_MS: z.coerce.number().int().min(60_000).default(2 * 60 * 60_000),
+    DEMO_RESET_INTERVAL_MS: z.coerce.number().int().min(60_000).default(60 * 60_000),
+    /** Simulated payments one demo session may create per hour. */
+    DEMO_PAYMENTS_PER_SESSION_PER_HOUR: z.coerce.number().int().positive().default(200),
+    /** Simulated payments ALL demo visitors together may create per hour (protects the database). */
+    DEMO_PAYMENTS_GLOBAL_PER_HOUR: z.coerce.number().int().positive().default(3_000),
+    /** Changes (POST/PUT) one demo session may make per minute. */
+    DEMO_ACTIONS_PER_MIN: z.coerce.number().int().positive().default(60),
+    DEMO_SESSIONS_PER_IP_PER_HOUR: z.coerce.number().int().positive().default(20),
+    // Behind a hosting proxy (Render, Fly, Railway...) set to 1 so rate limits see the real client IP.
+    TRUST_PROXY: z.coerce.number().int().min(0).max(5).default(0),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production' && env.ENABLE_NAIVE_ENDPOINTS) {
@@ -87,6 +101,13 @@ const envSchema = z
         code: z.ZodIssueCode.custom,
         path: ['ENABLE_NAIVE_ENDPOINTS'],
         message: 'The deliberately unsafe naive endpoints can never be enabled in production',
+      });
+    }
+    if (env.PUBLIC_DEMO && env.ENABLE_NAIVE_ENDPOINTS) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['ENABLE_NAIVE_ENDPOINTS'],
+        message: 'Turn the unsafe naive endpoints off (ENABLE_NAIVE_ENDPOINTS=false) when PUBLIC_DEMO=true',
       });
     }
   });

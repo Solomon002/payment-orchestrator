@@ -2,6 +2,7 @@ import { Worker } from 'bullmq';
 import type { AppContext } from '../context';
 import { markWebhookDeadLettered, processWebhookEvent } from '../modules/webhooks/webhook.processor';
 import { runNightlyReconciliation } from '../modules/reconciliation/reconciliation.service';
+import { initDemoSchedule, resetDemo } from '../modules/demo/demo.service';
 import { pollPendingPayments } from './poller';
 import { bullConnection, QUEUE_NAMES, QUEUE_PREFIX } from './queues';
 
@@ -36,6 +37,7 @@ export function startWorkers(ctx: AppContext, extraMaintenance: Record<string, M
     QUEUE_NAMES.maintenance,
     async (job) => {
       if (job.name === 'poll-pending') return pollPendingPayments(ctx);
+      if (job.name === 'demo-reset') return resetDemo(ctx);
       if (job.name === 'reconcile-nightly') {
         const run = await runNightlyReconciliation(ctx);
         return { runId: run.id, totals: run.totals };
@@ -71,4 +73,15 @@ export async function scheduleRecurringJobs(ctx: AppContext) {
     { pattern: ctx.config.RECONCILIATION_CRON, tz: ctx.config.RECONCILIATION_TZ },
     { name: 'reconcile-nightly', opts: { removeOnComplete: { count: 30 }, removeOnFail: { count: 30 } } },
   );
+  // Public demo: wipe and reseed the shared sandbox on a fixed interval.
+  if (ctx.config.PUBLIC_DEMO) {
+    await initDemoSchedule(ctx);
+    await ctx.queues.maintenance.upsertJobScheduler(
+      'demo-reset',
+      { every: ctx.config.DEMO_RESET_INTERVAL_MS },
+      { name: 'demo-reset', opts: { removeOnComplete: { count: 10 }, removeOnFail: { count: 10 } } },
+    );
+  } else {
+    await ctx.queues.maintenance.removeJobScheduler('demo-reset');
+  }
 }

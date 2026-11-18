@@ -166,3 +166,17 @@ Note that the naive run did not break the ledger's zero-sum rule: every entry ba
 **Bugs it prevents:** One bank's outage blocking every bank's customers; routing that floods a dead rail; paying higher fees than necessary on normal days. Bonus: the demo exposed a double-charge bug in the payment path (bookkeeping errors after a successful charge caused failover). Now fixed, with a regression test.
 
 **Interview question:** *"Why not just use a multi-armed bandit for routing?"* A plain bandit optimises the average and forgets: during a long outage nothing is learned, old failures decay, and it starts sending traffic back too early. Payments need hysteresis for dead routes (a circuit breaker) plus smart ordering among healthy ones (the bandit). I showed this with a simulator rather than asserting it.
+
+---
+
+## Phase 8: Public demo mode
+
+**What we built:** A "Try the live demo" button that gives visitors a temporary session, server-side permissions (an allow-list), quotas and rate limits, and an hourly job that wipes and reseeds the sandbox.
+
+**Key idea (analogy):** A shop's display phone. Anyone can pick it up and try it, but it's in demo mode: you can't install apps or change the admin settings, it's chained to the table (quotas), and staff reset it every evening (the hourly reset).
+
+**Security idea:** Permissions are an **allow-list** checked on the **server**. Hiding buttons in the UI is only a convenience; a visitor calling the API directly is refused (403). An allow-list means a new admin endpoint is denied to visitors by default; a deny-list would quietly expose it.
+
+**Bug it prevents:** Strangers with full admin access; one visitor spamming thousands of payments and filling the database; a broken demo staying broken.
+
+**Interview question:** *"How do you let anonymous users try an admin tool safely?"* Separate, temporary, low-privilege sessions; server-enforced allow-list; quotas with atomic counters (per user and global); rate-limit session creation per IP; and make the whole environment disposable (isolated database, periodic reset).

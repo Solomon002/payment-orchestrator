@@ -61,6 +61,15 @@ describe('mock gateway', () => {
     expect(zenith.status).toBe(200);
   });
 
+  it('clears all charges on request (demo reset)', async () => {
+    const { app } = make();
+    await request(app).post('/charges').set('authorization', `Bearer ${SECRET}`).send(charge);
+    expect(gw.charges.size).toBe(1);
+    expect((await request(app).post('/control/clear').send()).status).toBe(401); // control key required
+    await request(app).post('/control/clear').set('x-control-key', CONTROL).send();
+    expect(gw.charges.size).toBe(0);
+  });
+
   it('rejects invalid control updates', async () => {
     const { app } = make();
     const res = await request(app).put('/control').set('x-control-key', CONTROL).send({ failureRate: 500 });

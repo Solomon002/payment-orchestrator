@@ -4,6 +4,7 @@ import { DataList } from '../components/DataList';
 import { Badge, Button, Card, ErrorNote, inputClass, Mono } from '../components/ui';
 import { api, getAdminKey, post, type Discrepancy, type ReconRun } from '../lib/api';
 import { dateTime, naira, shortRef } from '../lib/format';
+import { useMe } from '../lib/useMe';
 
 const TYPE_HELP: Record<Discrepancy['type'], string> = {
   missing_in_ledger: 'Gateway settled money we have no payment for',
@@ -15,6 +16,7 @@ const TYPE_HELP: Record<Discrepancy['type'], string> = {
 export function ReconciliationPage() {
   const qc = useQueryClient();
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
+  const { isDemo } = useMe();
   const [csv, setCsv] = useState('');
   const [csvResult, setCsvResult] = useState<string | null>(null);
 
@@ -82,7 +84,10 @@ export function ReconciliationPage() {
             {
               header: 'Action',
               mobile: 'badge',
-              cell: (d) => (
+              cell: (d) =>
+                isDemo ? (
+                  <span className="text-xs text-slate-400" title="Resolving is not available in the public demo">Owner only</span>
+                ) : (
                 <Button
                   variant="secondary"
                   onClick={() => {
@@ -92,7 +97,7 @@ export function ReconciliationPage() {
                 >
                   Resolve
                 </Button>
-              ),
+                ),
             },
           ]}
         />
@@ -143,6 +148,11 @@ export function ReconciliationPage() {
         </Card>
       )}
 
+      {isDemo ? (
+        <Card title="Upload a settlement CSV">
+          <p className="text-sm text-slate-500">Uploading settlement files is turned off in the public demo. The owner uses it for gateways without a settlement API (e.g. Paystack).</p>
+        </Card>
+      ) : (
       <Card title="Upload a settlement CSV (for gateways without a settlement API)">
         <p className="mb-2 break-all text-xs text-slate-500">
           Header: <Mono>gateway,reference,amount_kobo,fee_kobo,settled_at,batch_id</Mono>
@@ -154,6 +164,7 @@ export function ReconciliationPage() {
         </div>
         <div className="mt-2"><ErrorNote error={upload.error} /></div>
       </Card>
+      )}
     </div>
   );
 }

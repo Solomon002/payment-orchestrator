@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Badge, Button, Card, cx, ErrorNote, inputClass, Mono } from '../components/ui';
 import { api, post, put, type MockGatewayState } from '../lib/api';
 import { naira, shortRef, time } from '../lib/format';
+import { useMe } from '../lib/useMe';
 import { RouteGrid } from './GatewayHealth';
 
 type GatewayName = 'mockpay-a' | 'mockpay-b';
@@ -178,6 +179,8 @@ export function SimulatorPage() {
   const [count, setCount] = useState(10);
   const [amount, setAmount] = useState(500_000);
   const [bank, setBank] = useState('mixed');
+  const { isDemo } = useMe();
+  const maxCount = isDemo ? 20 : 50; // the server enforces the same limit for demo visitors
   const [lastFire, setLastFire] = useState<string | null>(null);
 
   const fire = useMutation({
@@ -241,7 +244,7 @@ export function SimulatorPage() {
             </label>
             <label className="text-sm">
               Count
-              <input type="number" min={1} max={50} className={`${inputClass} mt-1`} value={count} onChange={(e) => setCount(Math.min(50, Math.max(1, Number(e.target.value))))} />
+              <input type="number" min={1} max={maxCount} className={`${inputClass} mt-1`} value={count} onChange={(e) => setCount(Math.min(maxCount, Math.max(1, Number(e.target.value))))} />
             </label>
             <label className="text-sm">
               Amount

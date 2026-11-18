@@ -2,6 +2,7 @@ import type { RequestHandler, Response } from 'express';
 import type { AppContext } from '../context';
 import { safeEqual, sha256Hex } from '../lib/crypto';
 import { unauthorized } from '../lib/errors';
+import { getDemoSession } from '../modules/demo/demo.service';
 
 export interface AuthedMerchant {
   id: string;
@@ -36,15 +37,30 @@ export function getMerchant(res: Response): AuthedMerchant {
   return merchant;
 }
 
+export type AdminRole = 'owner' | 'demo';
+
 /**
- * Admin (dashboard) authentication: `X-Admin-Key: <ADMIN_API_KEY>`.
- * A single shared key is a deliberate simplification for a local demo;
- * see docs/DECISIONS.md for what a production system would use instead.
+ * Dashboard authentication via `X-Admin-Key`. Two kinds of credential:
+ *  - the owner's ADMIN_API_KEY (full access), compared in constant time;
+ *  - when PUBLIC_DEMO=true, a temporary demo session token (limited access,
+ *    enforced by demoPolicy).
+ * A single shared owner key is a deliberate simplification; see docs/DECISIONS.md.
  */
 export function adminAuth(ctx: AppContext): RequestHandler {
-  return (req, _res, next) => {
+  return async (req, res, next) => {
     const provided = req.get('x-admin-key') ?? '';
-    if (!provided || !safeEqual(provided, ctx.config.ADMIN_API_KEY)) throw unauthorized('Invalid admin key');
-    next();
+    if (provided && safeEqual(provided, ctx.config.ADMIN_API_KEY)) {
+      res.locals.role = 'owner' satisfies AdminRole;
+      return next();
+    }
+    const session = provided ? await getDemoSession(ctx, provided) : null;
+    if (session) {
+      res.locals.role = 'demo' satisfies AdminRole;
+      res.locals.demoSession = session;
+      return next();
+    }
+    throw unauthorized('Invalid admin key');
   };
 }
+
+export const roleOf = (res: Response): AdminRole => (res.locals.role as AdminRole | undefined) ?? 'owner';

@@ -164,3 +164,34 @@ export interface MockGatewayState {
   stats?: { charges: number; succeeded: number; failed: number; pending: number };
   recentDeliveries?: Delivery[];
 }
+
+// ---------- Public demo ----------
+
+export interface DemoInfo {
+  enabled: boolean;
+  resetIntervalMinutes?: number;
+  nextResetAt?: string | null;
+  sessionMinutes?: number;
+  limits?: { paymentsPerClick: number; paymentsPerHour: number };
+}
+
+export interface Me {
+  role: 'owner' | 'demo';
+  expiresAt: string | null;
+  nextResetAt: string | null;
+}
+
+/** Unauthenticated: is the public demo on? */
+export async function getDemoInfo(): Promise<DemoInfo> {
+  const res = await fetch('/api/demo/info');
+  if (!res.ok) return { enabled: false };
+  return (await res.json()) as DemoInfo;
+}
+
+/** Starts a temporary demo session and signs in with it. */
+export async function startDemoSession(): Promise<void> {
+  const res = await fetch('/api/demo/session', { method: 'POST' });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new ApiError(res.status, body?.error?.code ?? 'HTTP_ERROR', body?.error?.message ?? 'Could not start the demo');
+  setAdminKey(body.token as string);
+}

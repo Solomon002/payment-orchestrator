@@ -93,11 +93,22 @@ pnpm lint
 pnpm typecheck
 ```
 
+## Public demo mode
+
+Set `PUBLIC_DEMO=true` (with `ENABLE_NAIVE_ENDPOINTS=false`) to turn the dashboard into a shared, self-resetting sandbox that anyone can try without a key:
+
+- The sign-in page shows **Try the live demo**. Visitors get a temporary session (a random token stored in Redis, 2-hour expiry), never the owner's admin key.
+- Demo sessions can read every page, break and fix the mock gateways, send test payments, and run the poller and reconciliation. Anything else (uploading settlement files, resolving discrepancies, any future admin action) is **refused by the server** (403), via an allow-list.
+- Limits: at most 20 payments per click, 200 per visitor per hour, 3,000 for all visitors per hour, 60 changes per visitor per minute, 20 new sessions per IP per hour.
+- Every hour (`DEMO_RESET_INTERVAL_MS`) the worker wipes and reseeds the sandbox: mock gateways reset and emptied, all tables truncated, routing health cleared, demo merchant reseeded. **This deletes all data, so only use demo mode on a database that holds nothing else.**
+- A banner tells visitors it is a shared test-mode sandbox and when it resets.
+- Behind a hosting proxy, set `TRUST_PROXY=1` so the per-IP limit sees real client addresses.
+
 ## Verified results
 
 | Check | Result |
 |---|---|
-| `pnpm test` | 90 tests passing (shared 6, dashboard 4, mock gateway 6, routing + lab 17, API 57) |
+| `pnpm test` | 102 tests passing (shared 6, dashboard 4, mock gateway 7, routing + lab 17, API 68) |
 | `pnpm demo` | 8/8 scenarios pass (including bank-level health) |
 | `pnpm lab` | bank-aware breaker 97.75% vs gateway-only 94.10% success when one bank fails everywhere; hybrid matches the best success rate in every scenario with the lowest fees (simulation, illustrative parameters) |
 | `pnpm demo:concurrency` | naive: 31 of 50 withdrawals succeeded, balance **−NGN 21,000**; safe: exactly 10, balance NGN 0; one key reused 50 times: 1 withdrawal |

@@ -13,6 +13,7 @@ import { sha256Hex } from '../../lib/crypto';
 import { MockGatewayAdapter } from '../gateways/mock.adapter';
 import { createPayment } from '../payments/payment.service';
 import { pollPendingPayments } from '../../queues/poller';
+import { consumeDemoPaymentQuota, demoSessionOf } from '../demo/demo.service';
 
 const firePaymentsSchema = z
   .object({
@@ -85,6 +86,9 @@ export function simulatorRoutes(ctx: AppContext): Router {
   /** Creates test payments for the seeded demo merchant, one after another. */
   router.post('/simulator/payments', async (req, res) => {
     const input = firePaymentsSchema.parse(req.body);
+    // Public demo visitors: at most 20 per click, and hourly quotas (per visitor and overall).
+    const demo = demoSessionOf(res);
+    if (demo) await consumeDemoPaymentQuota(ctx, demo, input.count);
     const merchant = await ctx.prisma.merchant.findUnique({ where: { apiKeyHash: sha256Hex(ctx.config.DEMO_MERCHANT_API_KEY) } });
     if (!merchant) throw new AppError(409, 'NO_DEMO_MERCHANT', 'Run "pnpm --filter @po/api db:seed" first');
 
